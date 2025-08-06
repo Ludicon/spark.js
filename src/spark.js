@@ -786,10 +786,9 @@ class Spark {
     for (const format of this.#supportedFormats) {
       if (!this.#pipelines[format]) {
         // Don't await — let them compile in the background
-        await this.#loadPipeline(format)
-        // this.#loadPipeline(format).catch(err => {
-        //   console.error(`Failed to preload pipeline for format ${format}:`, err)
-        // })
+        this.#loadPipeline(format).catch(err => {
+          console.error(`Failed to preload pipeline for format ${format}:`, err)
+        })
       }
     }
   }
