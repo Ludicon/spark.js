@@ -47,7 +47,7 @@
     "spark"
   ],
   "author": "Ignacio Castano <castano@ludicon.com> (https://ludicon.com/)",
-  "license": "MIT",
+  "license": "See LICENSE",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ludicon/spark.js.git"
