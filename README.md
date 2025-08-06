@@ -93,7 +93,7 @@ Load an image and encode it to a compressed GPU texture.
     Whether to encode the image using an as sRGB format. This also affects mipmap generation. The `srgb` mode can also be inferred from the `format`. Default: `false`. 
 
   - **`normal`** (`boolean`)
-    Whether to interpret the image as a normal map. This affects automatic format selection favoring the use of `"bc5"` and `"etc-rg"` formats. Default: `false`.
+    Whether to interpret the image as a normal map. This affects automatic format selection favoring the use of `"bc5"` and `"eac-rg"` formats. Default: `false`.
 
   - **`flipY`** (`boolean`)
     Whether to vertically flip the image before encoding. Default: `false`.
