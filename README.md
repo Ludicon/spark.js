@@ -72,7 +72,7 @@ And visit `https://localhost:5174/examples/basic.html`.
 
 ### `encodeTexture(source, options)`
 
-Load an image and transcode it to a compressed GPU texture.
+Load an image and encode it to a compressed GPU texture.
 
 #### Parameters
 
