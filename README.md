@@ -21,14 +21,14 @@ npm install @ludicon/spark.js
 ## Usage Example
 
 ```js
-import { Spark } from "spark.js"
+import { Spark } from "@ludicon/spark.js"
 
 // Initialize a WebGPU device with required features
 const adapter = await navigator.gpu.requestAdapter()
 const requiredFeatures = Spark.getRequiredFeatures(adapter)
 const device = await adapter.requestDevice({ requiredFeatures })
 
-// Create Spark instance for the WebGPU device
+// Create spark instance for the WebGPU device
 const spark = await Spark.create(device)
 
 // Load and encode an image into a GPU texture
