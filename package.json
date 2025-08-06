@@ -1,5 +1,5 @@
 {
-  "name": "spark.js",
+  "name": "@ludicon/spark.js",
   "version": "0.0.1",
   "description": "Real-Time GPU Texture Codecs for the Web",
   "main": "dist/index.esm.js",
@@ -26,21 +26,31 @@
     "clean": "rimraf dist"
   },
   "keywords": [
-    "typescript",
-    "library",
-    "modern",
-    "scalable",
-    "framework"
+    "gpu",
+    "webgpu",
+    "texture",
+    "compression",
+    "transcoding",
+    "astc",
+    "bc1",
+    "bc3",
+    "bc4",
+    "bc5",
+    "bc7",
+    "etc2",
+    "eac",
+    "graphics",
+    "wgsl",
+    "image",
+    "codec",
+    "real-time",
+    "spark"
   ],
-  "author": {
-    "name": "Ignacio Castano",
-    "email": "castano@ludicon.com",
-    "url": "https://ludicon.com/sparkjs/"
-  },
+  "author": "Ignacio Castano <castano@ludicon.com> (https://ludicon.com/)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ludicon/spark.js.git"
+    "url": "git+https://github.com/ludicon/spark.js.git"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
@@ -53,5 +63,12 @@
   },
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "directories": {
+    "example": "examples"
+  },
+  "bugs": {
+    "url": "https://github.com/ludicon/spark.js/issues"
+  },
+  "homepage": "https://ludicon.com/ludicon/sparkjs#readme"
 }
