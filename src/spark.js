@@ -316,11 +316,13 @@ class Spark {
   /**
    * Initialize the encoder by detecting available compression formats.
    * @param {GPUDevice} device - WebGPU device.
+   * @param {Object} options - Encoder options.
+   * @param {boolean} options.preload - Whether to preload all encoder pipelines (false by default).
    * @returns {Promise<void>} Resolves when initialization is complete.
    */
-  static async create(device, preload = false) {
+  static async create(device, options = {}) {
     const instance = new Spark()
-    await instance.#init(device, preload)
+    await instance.#init(device, options.preload ?? false)
     return instance
   }
 
