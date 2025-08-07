@@ -318,9 +318,9 @@ class Spark {
    * @param {GPUDevice} device - WebGPU device.
    * @returns {Promise<void>} Resolves when initialization is complete.
    */
-  static async create(device) {
+  static async create(device, preload = false) {
     const instance = new Spark()
-    await instance.#init(device)
+    await instance.#init(device, preload)
     return instance
   }
 
@@ -732,7 +732,7 @@ class Spark {
     return elapsedMilliseconds
   }
 
-  async #init(device) {
+  async #init(device, preload) {
     assert(device, "device is required")
     assert(isWebGPU(device), "device is not a WebGPU device")
 
@@ -783,12 +783,14 @@ class Spark {
     await this.#loadUtilPipelines()
 
     // Kick off parallel compilation of supported formats. Should we only compile a subset requested by the user?
-    for (const format of this.#supportedFormats) {
-      if (!this.#pipelines[format]) {
-        // Don't await — let them compile in the background
-        this.#loadPipeline(format).catch(err => {
-          console.error(`Failed to preload pipeline for format ${format}:`, err)
-        })
+    if (preload) {
+      for (const format of this.#supportedFormats) {
+        if (!this.#pipelines[format]) {
+          // Don't await — let them compile in the background
+          this.#loadPipeline(format).catch(err => {
+            console.error(`Failed to preload pipeline for format ${format}:`, err)
+          })
+        }
       }
     }
   }
@@ -796,7 +798,7 @@ class Spark {
   async #loadUtilPipelines() {
     // Load shader and pipeline
     const shaderModule = this.#device.createShaderModule({
-      code: shaders["utils.wgsl"],
+      code: await shaders["utils.wgsl"](),
       label: "utils"
     })
 
@@ -854,7 +856,7 @@ class Spark {
       const shaderFile = SparkShaderFiles[format]
       assert(shaderFile, `No shader available for format ${SparkFormatName[format]}`)
 
-      let shaderCode = shaders[shaderFile]
+      let shaderCode = await shaders[shaderFile]()
 
       if (!this.#supportsFloat16) {
         // @@ Implement a faster parser?
