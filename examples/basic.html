@@ -44,9 +44,8 @@
       }
 
       // Request WebGPU features that Spark needs.
-      const requestedFeatures = Spark.getRequiredFeatures(adapter)
-
-      const device = await adapter.requestDevice({ requiredFeatures: requestedFeatures });
+      const requiredFeatures = Spark.getRequiredFeatures(adapter)
+      const device = await adapter.requestDevice({ requiredFeatures });
 
       const canvas = document.createElement('canvas');
       document.body.appendChild(canvas);
