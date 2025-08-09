@@ -713,7 +713,8 @@ class Spark {
     commandEncoder.resolveQuerySet(this.#querySet, 0, 2, this.#queryBuffer, 0)
 
     // This copyBufferToBuffer crashes on current Safari.
-    commandEncoder.copyBufferToBuffer(this.#queryBuffer, this.#queryReadbackBuffer, 16)
+    // Must use the 5 argument variant, the 3 argument variant crashes in Opera.
+    commandEncoder.copyBufferToBuffer(this.#queryBuffer, 0, this.#queryReadbackBuffer, 0, 16)
 
     this.#device.queue.submit([commandEncoder.finish()])
 
