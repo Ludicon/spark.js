@@ -766,7 +766,10 @@ class Spark {
       // Safari: Copies from the query buffer to the readback buffer crash on Safari prior version 26.
       // Firefox: these createBuffers cause a device lost during shader module compilation. Maybe only on MacOS?
       if ((!webkitVersion || webkitVersion >= 26) && !firefoxVersion) {
-        this.#querySet = this.#device.createQuerySet({ type: "timestamp", count: 2 })
+        this.#querySet = this.#device.createQuerySet({
+          type: "timestamp",
+          count: 2
+        })
 
         this.#queryBuffer = this.#device.createBuffer({
           size: 16, // 2 timestamps × 8 bytes each
