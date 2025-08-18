@@ -68,7 +68,7 @@ fn flipy(@builtin(global_invocation_id) id : vec3<u32>) {
         return;
     }
 
-    let uv = vec2f(f32(id.x), f32(dstSize.y - 1u - id.y)) / vec2f(dstSize);
+    let uv = (vec2f(f32(id.x), f32(dstSize.y - 1u - id.y)) + vec2f(0.5)) / vec2f(dstSize);
     var color = textureSampleLevel(src, smp, uv, 0);
 
     if (params.to_srgb != 0) {
