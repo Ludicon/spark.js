@@ -37,7 +37,7 @@ const texture = await spark.encodeTexture("image.avif")
 
 The main entry point is `spark.encodeTexture()`, which loads an image and transcodes it into a compressed `GPUTexture` using the selected format and options. The example above uses default settings, but `encodeTexture` supports additional parameters for mipmap generation, sRGB encoding, normal map processing, and more.
 
-If the input image dimensions are not multiples of the block size, it will be resized to meet GPU format requirements. For best results, use textures with dimensions that are multiples of 4.
+If the input image dimensions are not multiples of the block size, it will be resized to meet GPU format requirements. For best results, use images with dimensions that are multiples of 4.
 
 
 ## Development
