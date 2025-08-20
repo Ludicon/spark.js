@@ -1016,7 +1016,7 @@ class Spark {
 
     if (!opaque) return 4
     if (grayscale) return 1
-    if (4 * invalidNormalCount < count) return 2
+    if (4 * 4 * invalidNormalCount < count) return 2
     return 3
   }
 
