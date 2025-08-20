@@ -963,20 +963,21 @@ class Spark {
       return SparkFormatMap[options.format]
     }
 
+    // Formats are sorted by number of channel and quality.
     const preferenceOrder = [
       "bc4-r",
+      "eac-r",
       "bc5-rg",
+      "eac-rg",
       "bc7-rgb",
-      "bc7-rgba",
       "bc1-rgb",
-      "bc3-rgba",
       "astc-rgb",
       "astc-4x4-rgb",
+      "etc2-rgb",
+      "bc7-rgba",
       "astc-rgba",
       "astc-4x4-rgba",
-      "eac-r",
-      "eac-rg",
-      "etc2-rgb",
+      "bc3-rgba",
       "etc2-rgba"
     ]
 
