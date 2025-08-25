@@ -45,6 +45,10 @@
       throw new Error('No appropriate GPUAdapter found');
     }
 
+    if (parseInt(THREE.REVISION, 10) < 180) {
+      throw new Error(`Three.js r180 or newer is required (found r${THREE.REVISION})`);
+    }
+
     const requiredFeatures = Spark.getRequiredFeatures(adapter);
     const device = await adapter.requestDevice({ requiredFeatures });
 
