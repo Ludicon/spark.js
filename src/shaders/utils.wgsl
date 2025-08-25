@@ -16,7 +16,7 @@ fn linear_to_srgb_vec3(c: vec3<f32>) -> vec3<f32> {
 }
 
 fn linear_to_srgb_vec4(c: vec4<f32>) -> vec4<f32> {
-    return vec4<f32>(linear_to_srgb_vec3(c.xyz), 1.0);
+    return vec4<f32>(linear_to_srgb_vec3(c.xyz), c.w);
 }
 
 @compute @workgroup_size(8, 8)
