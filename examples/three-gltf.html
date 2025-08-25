@@ -192,7 +192,8 @@
 
           this.spark.encodeTexture( url, { format, srgb, mips } ).then( ( gpuTexture ) => {
             const texture = new THREE.ExternalTexture( gpuTexture );
-            texture.colorSpace = this.colorSpace; // @@ IC: I don't think this makes any difference. Actually it appears that unless this is undefined, it's replaced with 'srgb'
+            //texture.isCompressedTexture = true;
+            //texture.colorSpace = this.colorSpace;
             if (this.format == 'rg') {
               texture.userData.unpackNormal = THREE.NormalRGPacking;
             }
