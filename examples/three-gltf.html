@@ -83,6 +83,15 @@
     const neutralEnvironment = pmremGenerator.fromScene(new RoomEnvironment()).texture;
     scene.environment = neutralEnvironment;
 
+    const Channel = {
+      R: 1, // 0001
+      G: 2, // 0010
+      B: 4, // 0100
+      A: 8, // 1000
+      RG: 3, // 0011
+      RGB: 7, // 0111
+      RGBA: 15, // 1111
+    };
 
     class GLTFSparkPlugin {
 
@@ -99,48 +108,65 @@
           [ 'r' ]: new SparkLoader( parser.fileLoader.manager, spark, 'r' ),
         };
 
-        this.initColorSpaces();
-      }
-
-      initColorSpaces() {
         const textureCount = this.parser.json.textures?.length || 0;
         const textureColorSpaces = new Array( textureCount ).fill( THREE.NoColorSpace );
-        const textureFormats = new Array( textureCount ).fill( 'rgb' );
+        const textureChannels = new Array( textureCount ).fill( 0 );
 
         for ( const materialDef of this.parser.json.materials ) {
           const baseColorTextureIndex = materialDef.pbrMetallicRoughness?.baseColorTexture?.index;
           if ( baseColorTextureIndex !== undefined ) {
             textureColorSpaces[ baseColorTextureIndex ] = THREE.SRGBColorSpace;
+            textureChannels[ baseColorTextureIndex ] |= Channel.RGB;
 
             if ( materialDef.alphaMode == "MASK" || materialDef.alphaMode == "BLEND" ) {
-              textureFormats[ baseColorTextureIndex ] = 'rgba';
+              textureChannels[ baseColorTextureIndex ] |= Channel.A;
             }
           }
 
           const emissiveTextureIndex = materialDef.emissiveTexture?.index;
           if ( emissiveTextureIndex !== undefined ) {
             textureColorSpaces[ emissiveTextureIndex ] = THREE.SRGBColorSpace;
+            textureChannels[ baseColorTextureIndex ] |= Channel.RGB;
           }
 
           const normalTextureIndex = materialDef.normalTexture?.index;
           if ( normalTextureIndex !== undefined ) {
-            textureFormats[ normalTextureIndex ] = 'rg';
+            textureChannels[ baseColorTextureIndex ] |= Channel.RG;
           }
 
           const occlusionTextureIndex = materialDef.occlusionTexture?.index;
           if ( occlusionTextureIndex !== undefined ) {
-            textureFormats[ occlusionTextureIndex ] = 'r';
+            textureChannels[ baseColorTextureIndex ] |= Channel.R;
+          }
+
+          const metallicRoughnessTextureIndex = materialDef.metallicRoughnessTexture?.index;
+          if ( metallicRoughnessTextureIndex !== undefined ) {
+            textureChannels[ metallicRoughnessTextureIndex ] |= Channel.G | Channel.B;
           }
         }
 
         this.textureColorSpaces = textureColorSpaces;
-        this.textureFormats = textureFormats;
+        this.textureChannels = textureChannels;
       }
 
       loadTexture( textureIndex ) {
         const imageIndex = this.parser.json.textures[ textureIndex ].source;
         const colorSpace = this.textureColorSpaces[ textureIndex ];
-        const format = this.textureFormats[ textureIndex ] + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "");
+        const channels = this.textureChannels[ textureIndex ];
+
+        let format = 'rgba' // Default to 'rgba'
+        if (channels == Channel.RGBA) {
+          format = 'rgba' + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "");
+        }
+        else if ((channels & Channel.RGB) == channels) {
+          format = 'rgb' + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "");
+        }
+        else if ((channels & Channel.RG) == channels) {
+          format = 'rg';
+        }
+        else if ((channels & Channel.R) == channels) {
+          format = 'r';
+        }
 
         const loader = this.loaders[ format ];
 
