@@ -193,7 +193,7 @@
             const texture = new THREE.ExternalTexture( gpuTexture );
             texture.colorSpace = this.colorSpace; // @@ IC: I don't think this makes any difference. Actually it appears that unless this is undefined, it's replaced with 'srgb'
             if (this.format == 'rg') {
-              texture.projectZ = true;
+              texture.userData.unpackNormal = THREE.NormalRGPacking;
             }
             onLoad( texture );
           } );
