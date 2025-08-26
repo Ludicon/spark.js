@@ -146,13 +146,12 @@
             }
           }
 
-          assignTexture(materialDef.normalTextureIndex?.index, Channel.RG, THREE.NoColorSpace, true);
+          assignTexture(materialDef.normalTexture?.index, Channel.RG, THREE.NoColorSpace, true);
           assignTexture(materialDef.emissiveTexture?.index, Channel.RGB, THREE.SRGBColorSpace);
           assignTexture(materialDef.occlusionTexture?.index, Channel.R);
-          assignTexture(materialDef.metallicRoughnessTexture?.index, Channel.G | Channel.B);
+          assignTexture(materialDef.pbrMetallicRoughness?.metallicRoughnessTexture?.index, Channel.G | Channel.B);
 
-          // KHR_materials_anisotropy
-          // RG contains direction, B contains strength.
+          // KHR_materials_anisotropy - RG contains direction, B contains strength.
           assignTexture(materialDef.anisotropyTexture?.index, Channel.RGB);
 
           // KHR_materials_clearcoat
@@ -193,14 +192,17 @@
         const channels = this.textureChannels[textureIndex];
 
         let format = "rgba" // Default to 'rgba'
-        if (channels == Channel.RGBA) {
-          format = "rgba" + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "");
-        } else if ((channels & Channel.RGB) == channels) {
-          format = "rgb" + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "");
+        if ((channels & Channel.R) == channels) {
+          format = "r";
         } else if ((channels & Channel.RG) == channels) {
           format = "rg";
-        } else if ((channels & Channel.R) == channels) {
-          format = "r";
+        } else if ((channels & Channel.RGB) == channels) {
+          format = "rgb" + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "");
+        } else {
+          format = "rgba" + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "");
+        }
+        if (isUncompressed) {
+          format = '';
         }
 
         const loader = this.loaders[format]
