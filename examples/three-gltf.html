@@ -108,14 +108,16 @@
           [ 'rgb-srgb' ]: new SparkLoader( parser.fileLoader.manager, spark, 'rgb', THREE.SRGBColorSpace ),
           [ 'rg' ]: new SparkLoader( parser.fileLoader.manager, spark, 'rg' ),
           [ 'r' ]: new SparkLoader( parser.fileLoader.manager, spark, 'r' ),
+          [ '' ]: new THREE.TextureLoader(),
         };
 
         const textureCount = this.parser.json.textures?.length || 0;
         const textureColorSpaces = new Array(textureCount).fill(THREE.NoColorSpace);
         const textureChannels = new Array(textureCount).fill(0);
         const textureIsNormal = new Array(textureCount).fill(false);
+        const textureIsUncompressed = new Array(textureCount).fill(false);
 
-        function assignTexture(index, channels, colorSpace, isNormal) {
+        function assignTexture(index, channels, colorSpace, isNormal, isUncompressed) {
           if (index === undefined) return;
 
           textureChannels[index] |= channels;
@@ -130,6 +132,9 @@
             if (threeRevision < 181) {
               textureChannels[normalTextureIndex] |= Channel.RGB;
             }
+          }
+          if (isUncompressed) {
+            textureIsUncompressed[index] = true;
           }
         }
 
@@ -184,12 +189,15 @@
 
         this.textureColorSpaces = textureColorSpaces;
         this.textureChannels = textureChannels;
+        this.textureIsNormal = textureIsNormal;
+        this.textureIsUncompressed = textureIsUncompressed;
       }
 
       loadTexture(textureIndex) {
         const imageIndex = this.parser.json.textures[textureIndex].source;
         const colorSpace = this.textureColorSpaces[textureIndex];
         const channels = this.textureChannels[textureIndex];
+        const isUncompressed = this.textureIsUncompressed[textureIndex];
 
         let format = "rgba" // Default to 'rgba'
         if ((channels & Channel.R) == channels) {
