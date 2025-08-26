@@ -1,6 +1,5 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-
 <head>
   <meta charset="utf-8" />
   <title>three.js + spark.js GLTF loader example</title>
@@ -45,7 +44,8 @@
       throw new Error('No appropriate GPUAdapter found');
     }
 
-    if (parseInt(THREE.REVISION, 10) < 180) {
+    const threeRevision = parseInt(THREE.REVISION, 10);
+    if (threeRevision < 180) {
       throw new Error(`Three.js r180 or newer is required (found r${THREE.REVISION})`);
     }
 
@@ -58,19 +58,17 @@
     const context = canvas.getContext('webgpu');
 
     // Create WebGPU renderer with the given device:
-    const renderer = new THREE.WebGPURenderer({ device, context, antialias: true })
+    const renderer = new THREE.WebGPURenderer({ device, context, antialias: true });
     await renderer.init();
 
     // Create spark device
     const spark = await Spark.create(device);
 
-
-
     // Scene
     const scene = new THREE.Scene();
 
     // Camera
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
     camera.position.set(2, 2, 3);
 
     // Controls
@@ -99,7 +97,6 @@
     };
 
     class GLTFSparkPlugin {
-
       constructor( parser, spark ) {
         this.name = 'spark';
         this.parser = parser;
@@ -114,120 +111,154 @@
         };
 
         const textureCount = this.parser.json.textures?.length || 0;
-        const textureColorSpaces = new Array( textureCount ).fill( THREE.NoColorSpace );
-        const textureChannels = new Array( textureCount ).fill( 0 );
+        const textureColorSpaces = new Array(textureCount).fill(THREE.NoColorSpace);
+        const textureChannels = new Array(textureCount).fill(0);
+        const textureIsNormal = new Array(textureCount).fill(false);
 
-        for ( const materialDef of this.parser.json.materials ) {
-          const baseColorTextureIndex = materialDef.pbrMetallicRoughness?.baseColorTexture?.index;
-          if ( baseColorTextureIndex !== undefined ) {
-            textureColorSpaces[ baseColorTextureIndex ] = THREE.SRGBColorSpace;
-            textureChannels[ baseColorTextureIndex ] |= Channel.RGB;
+        function assignTexture(index, channels, colorSpace, isNormal) {
+          if (index === undefined) return;
 
-            if ( materialDef.alphaMode == "MASK" || materialDef.alphaMode == "BLEND" ) {
-              textureChannels[ baseColorTextureIndex ] |= Channel.A;
+          textureChannels[index] |= channels;
+
+          if (colorSpace) {
+            textureColorSpaces[index] = colorSpace;
+          }
+          if (isNormal) {
+            textureIsNormal[index] = true;
+
+            // Normal map unpacking not supported in three.js prior to r181
+            if (threeRevision < 181) {
+              textureChannels[normalTextureIndex] |= Channel.RGB;
+            }
+          }
+        }
+
+        for (const materialDef of this.parser.json.materials) {
+          
+          const baseColorTextureIndex = materialDef.pbrMetallicRoughness?.baseColorTexture?.index
+          if (baseColorTextureIndex !== undefined) {
+            textureColorSpaces[baseColorTextureIndex] = THREE.SRGBColorSpace;
+            textureChannels[baseColorTextureIndex] |= Channel.RGB;
+
+            // Base color texture expects alpha when alpha mode is MASK or BLEND.
+            if (materialDef.alphaMode == "MASK" || materialDef.alphaMode == "BLEND") {
+              textureChannels[baseColorTextureIndex] |= Channel.A;
             }
           }
 
-          const emissiveTextureIndex = materialDef.emissiveTexture?.index;
-          if ( emissiveTextureIndex !== undefined ) {
-            textureColorSpaces[ emissiveTextureIndex ] = THREE.SRGBColorSpace;
-            textureChannels[ baseColorTextureIndex ] |= Channel.RGB;
-          }
+          assignTexture(materialDef.normalTextureIndex?.index, Channel.RG, THREE.NoColorSpace, true);
+          assignTexture(materialDef.emissiveTexture?.index, Channel.RGB, THREE.SRGBColorSpace);
+          assignTexture(materialDef.occlusionTexture?.index, Channel.R);
+          assignTexture(materialDef.metallicRoughnessTexture?.index, Channel.G | Channel.B);
 
-          const normalTextureIndex = materialDef.normalTexture?.index;
-          if ( normalTextureIndex !== undefined ) {
-            textureChannels[ baseColorTextureIndex ] |= Channel.RG;
-          }
+          // KHR_materials_anisotropy
+          // RG contains direction, B contains strength.
+          assignTexture(materialDef.anisotropyTexture?.index, Channel.RGB);
 
-          const occlusionTextureIndex = materialDef.occlusionTexture?.index;
-          if ( occlusionTextureIndex !== undefined ) {
-            textureChannels[ baseColorTextureIndex ] |= Channel.R;
-          }
+          // KHR_materials_clearcoat
+          assignTexture(materialDef.clearcoatTexture?.index, Channel.RGB, THREE.SRGBColorSpace);
+          assignTexture(materialDef.clearcoatRoughnessTexture?.index, Channel.R);
+          assignTexture(materialDef.clearcoatNormalTexture?.index, Channel.RG, THREE.NoColorSpace, true);
 
-          const metallicRoughnessTextureIndex = materialDef.metallicRoughnessTexture?.index;
-          if ( metallicRoughnessTextureIndex !== undefined ) {
-            textureChannels[ metallicRoughnessTextureIndex ] |= Channel.G | Channel.B;
-          }
+          // KHR_materials_diffuse_transmission
+          assignTexture(materialDef.diffuseTransmissionTexture?.index, Channel.A);
+          assignTexture(materialDef.diffuseTransmissionColorTexture?.index, Channel.RGB, THREE.SRGBColorSpace);
+
+          // KHR_materials_iridescence
+          assignTexture(materialDef.iridescenceTexture?.index, Channel.R);
+          assignTexture(materialDef.iridescenceThicknessTexture?.index, Channel.G);
+
+          // KHR_materials_sheen
+          assignTexture(materialDef.sheenColorTexture?.index, Channel.RGB, THREE.SRGBColorSpace);
+          assignTexture(materialDef.sheenRoughnessTextureIndex?.index, Channel.A);
+
+          // KHR_materials_specular
+          assignTexture(materialDef.specularTexture?.index, Channel.RGB, THREE.SRGBColorSpace);
+          assignTexture(materialDef.specularColorTexture?.index, Channel.A);
+
+          // KHR_materials_transmission
+          assignTexture(materialDef.transmissionTexture?.index, Channel.R);
+
+          // KHR_materials_volume
+          assignTexture(materialDef.thicknessTexture?.index, Channel.G);
         }
 
         this.textureColorSpaces = textureColorSpaces;
         this.textureChannels = textureChannels;
       }
 
-      loadTexture( textureIndex ) {
-        const imageIndex = this.parser.json.textures[ textureIndex ].source;
-        const colorSpace = this.textureColorSpaces[ textureIndex ];
-        const channels = this.textureChannels[ textureIndex ];
+      loadTexture(textureIndex) {
+        const imageIndex = this.parser.json.textures[textureIndex].source;
+        const colorSpace = this.textureColorSpaces[textureIndex];
+        const channels = this.textureChannels[textureIndex];
 
-        let format = 'rgba' // Default to 'rgba'
+        let format = "rgba" // Default to 'rgba'
         if (channels == Channel.RGBA) {
-          format = 'rgba' + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "");
-        }
-        else if ((channels & Channel.RGB) == channels) {
-          format = 'rgb' + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "");
-        }
-        else if ((channels & Channel.RG) == channels) {
-          format = 'rg';
-        }
-        else if ((channels & Channel.R) == channels) {
-          format = 'r';
+          format = "rgba" + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "");
+        } else if ((channels & Channel.RGB) == channels) {
+          format = "rgb" + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "");
+        } else if ((channels & Channel.RG) == channels) {
+          format = "rg";
+        } else if ((channels & Channel.R) == channels) {
+          format = "r";
         }
 
-        const loader = this.loaders[ format ];
+        const loader = this.loaders[format]
 
-        return this.parser.loadTextureImage( textureIndex, imageIndex, loader );
+        return this.parser.loadTextureImage(textureIndex, imageIndex, loader)
       }
     }
 
     class SparkLoader extends THREE.TextureLoader {
-
-      constructor( manager, spark, format, colorSpace = THREE.NoColorSpace ) {
-        super( manager );
+      constructor(manager, spark, format, colorSpace = THREE.NoColorSpace) {
+        super(manager);
         this.spark = spark;
         this.format = format;
         this.colorSpace = colorSpace;
       }
 
-      load( url, onLoad, onProgress, onError ) {
+      load(url, onLoad, onProgress, onError) {
         try {
           const format = this.format;
           const srgb = this.colorSpace === THREE.SRGBColorSpace;
           const mips = true;
 
-          this.spark.encodeTexture( url, { format, srgb, mips } ).then( ( gpuTexture ) => {
-            const texture = new THREE.ExternalTexture( gpuTexture );
-            //texture.isCompressedTexture = true;
-            //texture.colorSpace = this.colorSpace;
-            if (this.format == 'rg') {
+          this.spark.encodeTexture(url, { format, srgb, mips }).then(gpuTexture => {
+            const texture = new THREE.ExternalTexture(gpuTexture);
+            if (this.format == "rg") {
               texture.userData.unpackNormal = THREE.NormalRGPacking;
             }
-            onLoad( texture );
-          } );
-
-        } catch ( e ) {
-          onError( e );
+            onLoad(texture);
+          })
+        } catch (e) {
+          onError(e);
         }
       }
     }
 
     // Load GLTF
-    const loader = new GLTFLoader();
-    loader.register( ( parser ) => new GLTFSparkPlugin( parser, spark ) );
+    const loader = new GLTFLoader()
+    loader.register(parser => new GLTFSparkPlugin(parser, spark));
 
     // Hook up DRACOLoader
     const dracoLoader = new DRACOLoader();
     dracoLoader.setDecoderPath('./libs/draco/'); 
     loader.setDRACOLoader(dracoLoader);
 
-    const gltf = await loader.loadAsync( './assets/DamagedHelmet.glb' );
+    const gltf = await loader.loadAsync("./assets/DamagedHelmet.glb");
     //const gltf = await loader.loadAsync( './assets/LittlestTokyo.glb' );
     //const gltf = await loader.loadAsync( './assets/FlightHelmet.gltf' );
     //const gltf = await loader.loadAsync( './assets/SciFiHelmet.gltf' );
-    //const gltf = await loader.loadAsync( './assets/Horse.glb' );
     //const gltf = await loader.loadAsync( './assets/forest_house.glb' );
-    
-    scene.add(gltf.scene);
 
+
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const offset = box.getCenter(new THREE.Vector3());
+    //gltf.scene.position.sub(offset);
+    const scale = box.getSize(new THREE.Vector3()).length();
+    gltf.scene.scale.multiplyScalar(4 / scale);
+
+    scene.add(gltf.scene)
 
     // Handle resize
     function resize() {
