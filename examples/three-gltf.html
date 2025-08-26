@@ -130,7 +130,7 @@
 
             // Normal map unpacking not supported in three.js prior to r181
             if (threeRevision < 181) {
-              textureChannels[normalTextureIndex] |= Channel.RGB;
+              textureChannels[index] |= Channel.RGB;
             }
           }
           if (isUncompressed) {
