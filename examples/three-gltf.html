@@ -228,21 +228,29 @@
       }
 
       load(url, onLoad, onProgress, onError) {
-        try {
-          const format = this.format;
-          const srgb = this.colorSpace === THREE.SRGBColorSpace;
-          const mips = true;
+        const format = this.format;
+        const srgb = this.colorSpace === THREE.SRGBColorSpace;
+        const mips = true;
 
-          this.spark.encodeTexture(url, { format, srgb, mips }).then(gpuTexture => {
-            const texture = new THREE.ExternalTexture(gpuTexture);
-            if (this.format == "rg") {
-              texture.userData.unpackNormal = THREE.NormalRGPacking;
-            }
-            onLoad(texture);
-          })
-        } catch (e) {
-          onError(e);
-        }
+        this.spark.encodeTexture(url, { format, srgb, mips }).then(gpuTexture => {
+          const texture = new THREE.ExternalTexture(gpuTexture);
+          if (this.format == "rg") {
+            texture.userData.unpackNormal = THREE.NormalRGPacking;
+          }
+          onLoad(texture);
+        }).catch((err) => {
+          // Fallback: load the original image uncompressed
+          super.load(
+            url,
+            (tex) => {
+              tex.colorSpace = this.colorSpace;
+              onLoad?.(tex);
+            },
+            onProgress,
+            // If the fallback also fails, surface the original encoder error first
+            (fallbackErr) => onError?.(err ?? fallbackErr)
+          );
+        });
       }
     }
 
