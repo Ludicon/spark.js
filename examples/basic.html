@@ -134,7 +134,7 @@
       const { device, context, canvasFormat } = await initWebGPU();
 
       // Create Spark instance.
-      const spark = await Spark.create(device)
+      const spark = await Spark.create(device, { preload: ["rgb"] })
 
       // Create vertex buffer
       const vertexBuffer = createVertexBuffer(device);

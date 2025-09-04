@@ -471,6 +471,9 @@ class Spark {
 
     const format = await this.#getBestMatchingFormat(options, image)
 
+    // Start loading the pipeline as soon as we know the format.
+    const pipelinePromise = this.#loadPipeline(format)
+
     // Round up the size to meet WebGPU requirements.
     // It would be great if this contstraint was optional. The only API still requiring it is D3D12.
     const width = Math.ceil(image.width / 4) * 4
@@ -581,12 +584,6 @@ class Spark {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
     })
 
-    // Get codec pipeline, compile if necessary.
-    console.time("loadPipeline")
-
-    const pipeline = await this.#loadPipeline(format)
-
-    console.timeEnd("loadPipeline")
 
     // Dispatch compute shader to encode the input texture in the output buffer.
     console.time("dispatch compute shader")
@@ -602,7 +599,10 @@ class Spark {
       }
     }
 
-    const pass = commandEncoder.beginComputePass(args)
+    // Make sure the pipeline is loaded. Wait if necessary.
+    const pipeline = await pipelinePromise;
+
+    const pass = commandEncoder.beginComputePass(args)    
     pass.setPipeline(pipeline)
 
     for (let m = 0; m < mipmapCount; m++) {
@@ -790,8 +790,15 @@ class Spark {
 
     // Kick off parallel compilation of supported formats. Should we only compile a subset requested by the user?
     if (preload) {
-      for (const format of this.#supportedFormats) {
-        if (!this.#pipelines[format]) {
+      let formatsToLoad
+      if (Array.isArray(preload)) {
+        formatsToLoad = preload.map(n => this.#getPreferredFormat(n))
+      } else {
+        formatsToLoad = this.#supportedFormats
+      }
+
+      for (const format of formatsToLoad) {
+        if (format !== undefined && !this.#pipelines[format]) {
           // Don't await — let them compile in the background
           this.#loadPipeline(format).catch(err => {
             console.error(`Failed to preload pipeline for format ${format}:`, err)
@@ -859,6 +866,8 @@ class Spark {
     }
 
     const pipelinePromise = (async () => {
+      console.time("loadPipeline " + SparkFormatName[format])
+
       const shaderFile = SparkShaderFiles[format]
       assert(shaderFile, `No shader available for format ${SparkFormatName[format]}`)
 
@@ -900,6 +909,8 @@ class Spark {
         }
       })
 
+      console.timeEnd("loadPipeline " + SparkFormatName[format])
+
       return pipeline
     })()
 
@@ -909,6 +920,40 @@ class Spark {
 
   #isFormatSupported(format) {
     return this.#supportedFormats.has(format)
+  }
+
+  #getPreferredFormat(format) {
+
+    // First check if the format is an explicit format.
+    const explicitFormat = SparkFormatMap[format]
+    if (explicitFormat != undefined && this.#isFormatSupported(explicitFormat)) {
+      return explicitFormat
+    }
+
+    // Otherwise, try to match it based on the preferenceOrder. Formats are sorted by number of channel and quality.
+    const preferenceOrder = [
+      "bc4-r",
+      "eac-r",
+      "bc5-rg",
+      "eac-rg",
+      "bc7-rgb",
+      "bc1-rgb",
+      "astc-rgb",
+      "astc-4x4-rgb",
+      "etc2-rgb",
+      "bc7-rgba",
+      "astc-rgba",
+      "astc-4x4-rgba",
+      "bc3-rgba",
+      "etc2-rgba"
+    ]
+
+    // This allows selecting the best format using a substring like "rgb" or "astc"
+    for (const key of preferenceOrder) {
+      if (key.includes(format) && this.#isFormatSupported(SparkFormatMap[key])) {
+        return SparkFormatMap[key]
+      }
+    }
   }
 
   async #getBestMatchingFormat(options, image) {
@@ -959,36 +1004,12 @@ class Spark {
       throw new Error("No supported format found.")
     }
 
-    if (SparkFormatMap[options.format] != undefined && this.#isFormatSupported(SparkFormatMap[options.format])) {
-      return SparkFormatMap[options.format]
+    const format = this.#getPreferredFormat(options.format)
+    if (format === undefined) {
+      throw new Error(`Unsupported format: ${options.format}`)
     }
 
-    // Formats are sorted by number of channel and quality.
-    const preferenceOrder = [
-      "bc4-r",
-      "eac-r",
-      "bc5-rg",
-      "eac-rg",
-      "bc7-rgb",
-      "bc1-rgb",
-      "astc-rgb",
-      "astc-4x4-rgb",
-      "etc2-rgb",
-      "bc7-rgba",
-      "astc-rgba",
-      "astc-4x4-rgba",
-      "bc3-rgba",
-      "etc2-rgba"
-    ]
-
-    // This allows selecting the best format using a substring like "rgb" or "astc"
-    for (const key of preferenceOrder) {
-      if (key.includes(options.format) && this.#isFormatSupported(SparkFormatMap[key])) {
-        return SparkFormatMap[key]
-      }
-    }
-
-    throw new Error(`Unsupported format: ${options.format}`)
+    return format;
   }
 
   #detectChannelCount(imageData) {
