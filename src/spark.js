@@ -455,15 +455,43 @@ class Spark {
   }
 
   /**
-   * Load an image and transcode it to a compressed GPU texture.
-   * @param {GPUtexture | string | HTMLImageElement | HTMLCanvasElement | Blob | ArrayBuffer} source - Image input.
-   * @param {Object} options - Optional encoding options.
-   * @param {string} options.format - Desired block compression format ("rgb" by default).
-   * @param {boolean} options.generateMipmaps | options.mips - Whether to generate mipmaps (false by default).
-   * @param {boolean} options.srgb - Whether to store as sRGB. This also affects mipmap generation (false by default).
-   * @param {boolean} options.normal - Interpret the image as a normal map. Affects mipmap generation (false by default).
-   * @param {boolean} options.flipY - Flip image vertically.
-   * @returns {Promise<GPUTexture>} - A promise resolving to a GPU texture.
+   * Load an image and encode it to a compressed GPU texture.
+   *
+   * @param {GPUTexture | string | HTMLImageElement | HTMLCanvasElement | Blob | ArrayBuffer} source
+   *        The image to encode. Can be a GPUTexture, URL, DOM image/canvas, binary buffer, or Blob.
+   *
+   * @param {Object} [options] - Optional configuration for encoding.
+   *
+   * @param {string} [options.format="rgb"]
+   *        Desired block compression format. Can be specified in several ways:
+   *          - A channel mask indicating the number of channels in your input:
+   *            "rgba", "rgb", "rg", or "r". The actual GPU format is selected
+   *            based on device capabilities.
+   *          - An explicit WebGPU BC, ETC, or ASTC format name, or an abbreviated
+   *            form such as "bc7" or "astc". Note: only 4x4 LDR formats are supported.
+   *          - "auto" to analyze the input texture and detect the required channels.
+   *            This has some overhead, so specifying a format explicitly is preferred.
+   *
+   * @param {boolean} [options.alpha]
+   *        Hint for the automatic format selector. When no explicit format is provided,
+   *        the format is assumed to be "rgb". Supplying `alpha: true` will favor RGBA formats.
+   *
+   * @param {boolean} [options.mips=false] | [options.generateMipmaps=false]
+   *        Whether to generate mipmaps. Mipmaps are generated with a basic box filter
+   *        in linear space.
+   *
+   * @param {boolean} [options.srgb=false]
+   *        Whether to encode the image in an sRGB format. Also affects mipmap generation.
+   *        The `srgb` mode can also be inferred from the `format`.
+   *
+   * @param {boolean} [options.normal=false]
+   *        Interpret the image as a normal map. Affects automatic format selection,
+   *        favoring "bc5" and "eac-rg" formats.
+   *
+   * @param {boolean} [options.flipY=false]
+   *        Whether to vertically flip the image before encoding.
+   *
+   * @returns {Promise<GPUTexture>} A promise resolving to the encoded GPU texture.
    */
   async encodeTexture(source, options = {}) {
     assert(this.#device, "Spark is not initialized")
