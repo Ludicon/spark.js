@@ -955,6 +955,9 @@ class Spark {
         if (this.#isFormatSupported(SparkFormat.ASTC_4x4_RGB)) return SparkFormat.ASTC_4x4_RGB
         if (this.#isFormatSupported(SparkFormat.BC1_RGB)) return SparkFormat.BC1_RGB
         if (this.#isFormatSupported(SparkFormat.ETC2_RGB)) return SparkFormat.ETC2_RGB
+      } else if (options.normal) {
+        if (this.#isFormatSupported(SparkFormat.BC5_RG)) return SparkFormat.BC5_RG
+        if (this.#isFormatSupported(SparkFormat.EAC_RG)) return SparkFormat.EAC_RG
       } else {
         let channelCount
         if (image instanceof GPUTexture) {
