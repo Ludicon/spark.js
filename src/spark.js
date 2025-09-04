@@ -434,6 +434,8 @@ class Spark {
     // Only load the image if the format has not been specified by the user.
     if (options.format == undefined || options.format == "auto") {
       const image = source instanceof Image || source instanceof GPUTexture ? source : await loadImage(source)
+      
+      options.format = "auto"
       const format = await this.#getBestMatchingFormat(options, image)
 
       options.format = SparkFormatName[format]
@@ -456,7 +458,7 @@ class Spark {
    * Load an image and transcode it to a compressed GPU texture.
    * @param {GPUtexture | string | HTMLImageElement | HTMLCanvasElement | Blob | ArrayBuffer} source - Image input.
    * @param {Object} options - Optional encoding options.
-   * @param {string} options.format - Desired block compression format (auto-detect by default).
+   * @param {string} options.format - Desired block compression format ("rgb" by default).
    * @param {boolean} options.generateMipmaps | options.mips - Whether to generate mipmaps (false by default).
    * @param {boolean} options.srgb - Whether to store as sRGB. This also affects mipmap generation (false by default).
    * @param {boolean} options.normal - Interpret the image as a normal map. Affects mipmap generation (false by default).
@@ -912,7 +914,9 @@ class Spark {
   }
 
   async #getBestMatchingFormat(options, image) {
-    if (!options.format || options.format == "auto") {
+    if (options.format == undefined) {
+      options.format = "rgb"
+    } else if (options.format == "auto") {
       if (options.alpha) {
         if (this.#isFormatSupported(SparkFormat.BC7_RGBA)) return SparkFormat.BC7_RGBA
         if (this.#isFormatSupported(SparkFormat.ASTC_4x4_RGBA)) return SparkFormat.ASTC_4x4_RGBA
