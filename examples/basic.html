@@ -15,7 +15,7 @@
 
 <body>
   <script type="module">
-    import { Spark } from '../dist/index.esm.js';
+    import { Spark } from "@ludicon/spark.js";
 
     const errorMessage = `
           <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
@@ -145,7 +145,6 @@
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
 
-      //const textureUrl = 'https://threejs.org/examples/textures/crate.gif';
       const textureUrl = './assets/kodim23.avif';
 
       let texture;
@@ -153,10 +152,7 @@
         device.pushErrorScope('validation')
         device.pushErrorScope('internal')
 
-        //const texture = await spark.encodeTexture(textureUrl);
-        texture = await spark.encodeTexture(textureUrl, { generateMipmaps: true, srgb: true, flipY: false });
-        //const texture = await spark.encodeTexture(textureUrl, {format: "bc1"});
-        //const texture = await spark.encodeTexture(textureUrl, {format: "etc"});
+        texture = await spark.encodeTexture(textureUrl, { format: "rgb", srgb: true, mips: true, flipY: false });
 
       } finally {
         const validationError = await device.popErrorScope();

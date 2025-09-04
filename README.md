@@ -63,9 +63,15 @@ npm run build
 npm run serve
 ```
 
-And visit `https://localhost:5174/examples/basic.html`.
+And visit `http://localhost:5174/examples/basic.html`.
 
-> Note: HTTPS is required to enable WebGPU features
+> Note: Browsers treat http://localhost as a secure context, so HTTPS is not required when testing locally on the same machine. However, to access the dev server from another device you must enable HTTPS for WebGPU features to work.
+>
+> To run the server with HTTPS, set the environment variable `HTTPS` to `true` before starting the server:
+>
+> ```bash
+> HTTPS=true npm run serve
+> ```
 
 
 ## Documentation

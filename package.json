@@ -2,12 +2,12 @@
   "name": "@ludicon/spark.js",
   "version": "0.0.5",
   "description": "Real-Time GPU Texture Codecs for the Web",
-  "main": "dist/index.esm.js",
-  "module": "dist/index.esm.js",
+  "main": "dist/spark.esm.js",
+  "module": "dist/spark.esm.js",
   "type": "module",
   "exports": {
     ".": {
-      "import": "./dist/index.esm.js"
+      "import": "./dist/spark.esm.js"
     }
   },
   "files": [
@@ -28,6 +28,7 @@
   "keywords": [
     "gpu",
     "webgpu",
+    "spark",
     "texture",
     "compression",
     "transcoding",
@@ -43,10 +44,9 @@
     "wgsl",
     "image",
     "codec",
-    "real-time",
-    "spark"
+    "real-time"
   ],
-  "author": "Ignacio Castano <castano@ludicon.com> (https://ludicon.com/)",
+  "author": "Ludicon LLC (https://ludicon.com/)",
   "license": "See LICENSE",
   "repository": {
     "type": "git",
@@ -70,5 +70,5 @@
   "bugs": {
     "url": "https://github.com/ludicon/spark.js/issues"
   },
-  "homepage": "https://ludicon.com/ludicon/sparkjs#readme"
+  "homepage": "https://ludicon.com/sparkjs"
 }
