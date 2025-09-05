@@ -17,8 +17,9 @@
   ],
   "scripts": {
     "build": "vite build",
-    "dev": "vite build --watch",
-    "serve": "vite --host",
+    "watch": "vite build --watch",
+    "serve": "vite --host --open /examples/index.html",
+    "dev": "run-p watch serve",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.{js,jsx}\"",
@@ -57,6 +58,7 @@
     "@vitejs/plugin-basic-ssl": "^2.1.0",
     "eslint": "^9.0.0",
     "globals": "^15.0.0",
+    "npm-run-all": "^4.1.5",
     "prettier": "^3.0.0",
     "rimraf": "^5.0.0",
     "vite": "^7.0.0"

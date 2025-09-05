@@ -50,7 +50,7 @@ npm install
 npm run build
 
 # Development mode with watch
-npm run dev
+npm run watch
 ```
 
 
@@ -59,8 +59,7 @@ npm run dev
 To run local examples:
 
 ```bash
-npm run build
-npm run serve
+npm run dev
 ```
 
 And visit `http://localhost:5174/examples/basic.html`.
