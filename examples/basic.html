@@ -2,12 +2,14 @@
 <html>
 
 <head>
-  <meta charset="utf-8" />
   <title>spark.js example</title>
   <style>
-    html, body { height: 100%; margin: 0; }
-    body { background: #111; }    
-    canvas { display: block; width: 100%; height: 100%; }
+    body {
+      margin: 0;
+    }
+    canvas {
+      display: block;
+    }
   </style>
 </head>
 
@@ -16,12 +18,13 @@
     import { Spark } from "@ludicon/spark.js";
 
     const errorMessage = `
-      <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
-        <h1>WebGPU Not Supported</h1>
-        <p>This demo requires a browser with WebGPU support.</p>
-        <p>Please try using <strong>Chrome</strong> or <strong>Edge</strong> with WebGPU enabled, or a recent version of <strong>Safari</strong> on macOS.</p>
-        <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API" target="_blank">MDN: WebGPU API</a></p>
-      </div>`;
+          <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
+            <h1>WebGPU Not Supported</h1>
+            <p>This demo requires a browser with WebGPU support.</p>
+            <p>Please try using <strong>Chrome</strong> or <strong>Edge</strong> with WebGPU enabled, or a recent version of <strong>Safari</strong> on macOS.</p>
+            <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API" target="_blank">MDN: WebGPU API</a></p>
+          </div>
+        `;
 
     async function initWebGPU() {
       if (!navigator.gpu) {
@@ -61,48 +64,50 @@
 
     // Vertex shader
     const vertexShader = `
-      struct Uniforms {
-          canvasWidth: f32,
-          canvasHeight: f32,
-          textureWidth: f32,
-          textureHeight: f32,
-      }
-      @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+            struct Uniforms {
+                canvasWidth: f32,
+                canvasHeight: f32,
+                textureWidth: f32,
+                textureHeight: f32,
+            }
+            @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
-      struct VertexOutput {
-          @builtin(position) position: vec4f,
-          @location(0) texCoord: vec2f,
-      }
+            struct VertexOutput {
+                @builtin(position) position: vec4f,
+                @location(0) texCoord: vec2f,
+            }
 
-      @vertex
-      fn main(@location(0) position: vec2f,
-              @location(1) texCoord: vec2f) -> VertexOutput {
-          var output: VertexOutput;
-          
-          // Scale the position to maintain 1:1 aspect ratio
-          let aspect = (uniforms.textureHeight * uniforms.canvasWidth) / (uniforms.canvasHeight * uniforms.textureWidth);
-          
-          let scale = vec2f(
-              min(1.0, 1.0 / aspect), 
-              max(-1.0, -aspect));
-          let scaledPos = position * scale;
-          
-          output.position = vec4f(scaledPos, 0.0, 1.0);
-          output.texCoord = texCoord;
-          return output;
-      } `;
+            @vertex
+            fn main(@location(0) position: vec2f,
+                    @location(1) texCoord: vec2f) -> VertexOutput {
+                var output: VertexOutput;
+                
+                // Scale the position to maintain 1:1 aspect ratio
+                let aspect = (uniforms.textureHeight * uniforms.canvasWidth) / (uniforms.canvasHeight * uniforms.textureWidth);
+                
+                let scale = vec2f(
+                    min(1.0, 1.0 / aspect), 
+                    max(-1.0, -aspect));
+                let scaledPos = position * scale;
+                
+                output.position = vec4f(scaledPos, 0.0, 1.0);
+                output.texCoord = texCoord;
+                return output;
+            }
+        `;
 
     // Fragment shader
     const fragmentShader = `
-      @group(0) @binding(1) var t_diffuse: texture_2d<f32>;
-      @group(0) @binding(2) var s_diffuse: sampler;
+            @group(0) @binding(1) var t_diffuse: texture_2d<f32>;
+            @group(0) @binding(2) var s_diffuse: sampler;
 
-      @fragment
-      fn main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
-          var color = textureSampleLevel(t_diffuse, s_diffuse, texCoord, 0.0).xyz;
+            @fragment
+            fn main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
+                var color = textureSampleLevel(t_diffuse, s_diffuse, texCoord, 0.0).xyz;
 
-          return vec4f(color, 1.0);
-      }`;
+                return vec4f(color, 1.0);
+            }
+        `;
 
     // Create vertex buffer
     function createVertexBuffer(device) {
