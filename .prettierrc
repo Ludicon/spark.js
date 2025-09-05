@@ -1,0 +1,7 @@
+{
+  "arrowParens": "avoid",
+  "plugins": [],
+  "printWidth": 120,
+  "semi": false,
+  "trailingComma": "none"
+}

@@ -434,6 +434,8 @@ class Spark {
     // Only load the image if the format has not been specified by the user.
     if (options.format == undefined || options.format == "auto") {
       const image = source instanceof Image || source instanceof GPUTexture ? source : await loadImage(source)
+      
+      options.format = "auto"
       const format = await this.#getBestMatchingFormat(options, image)
 
       options.format = SparkFormatName[format]
@@ -453,15 +455,43 @@ class Spark {
   }
 
   /**
-   * Load an image and transcode it to a compressed GPU texture.
-   * @param {GPUtexture | string | HTMLImageElement | HTMLCanvasElement | Blob | ArrayBuffer} source - Image input.
-   * @param {Object} options - Optional encoding options.
-   * @param {string} options.format - Desired block compression format (auto-detect by default).
-   * @param {boolean} options.generateMipmaps | options.mips - Whether to generate mipmaps (false by default).
-   * @param {boolean} options.srgb - Whether to store as sRGB. This also affects mipmap generation (false by default).
-   * @param {boolean} options.normal - Interpret the image as a normal map. Affects mipmap generation (false by default).
-   * @param {boolean} options.flipY - Flip image vertically.
-   * @returns {Promise<GPUTexture>} - A promise resolving to a GPU texture.
+   * Load an image and encode it to a compressed GPU texture.
+   *
+   * @param {GPUTexture | string | HTMLImageElement | HTMLCanvasElement | Blob | ArrayBuffer} source
+   *        The image to encode. Can be a GPUTexture, URL, DOM image/canvas, binary buffer, or Blob.
+   *
+   * @param {Object} [options] - Optional configuration for encoding.
+   *
+   * @param {string} [options.format="rgb"]
+   *        Desired block compression format. Can be specified in several ways:
+   *          - A channel mask indicating the number of channels in your input:
+   *            "rgba", "rgb", "rg", or "r". The actual GPU format is selected
+   *            based on device capabilities.
+   *          - An explicit WebGPU BC, ETC, or ASTC format name, or an abbreviated
+   *            form such as "bc7" or "astc". Note: only 4x4 LDR formats are supported.
+   *          - "auto" to analyze the input texture and detect the required channels.
+   *            This has some overhead, so specifying a format explicitly is preferred.
+   *
+   * @param {boolean} [options.alpha]
+   *        Hint for the automatic format selector. When no explicit format is provided,
+   *        the format is assumed to be "rgb". Supplying `alpha: true` will favor RGBA formats.
+   *
+   * @param {boolean} [options.mips=false] | [options.generateMipmaps=false]
+   *        Whether to generate mipmaps. Mipmaps are generated with a basic box filter
+   *        in linear space.
+   *
+   * @param {boolean} [options.srgb=false]
+   *        Whether to encode the image in an sRGB format. Also affects mipmap generation.
+   *        The `srgb` mode can also be inferred from the `format`.
+   *
+   * @param {boolean} [options.normal=false]
+   *        Interpret the image as a normal map. Affects automatic format selection,
+   *        favoring "bc5" and "eac-rg" formats.
+   *
+   * @param {boolean} [options.flipY=false]
+   *        Whether to vertically flip the image before encoding.
+   *
+   * @returns {Promise<GPUTexture>} A promise resolving to the encoded GPU texture.
    */
   async encodeTexture(source, options = {}) {
     assert(this.#device, "Spark is not initialized")
@@ -503,6 +533,8 @@ class Spark {
     }
 
     const commandEncoder = this.#device.createCommandEncoder()
+
+    commandEncoder.pushDebugGroup?.("spark process texture");
 
     if (this.#querySet && typeof commandEncoder.writeTimestamp === "function") {
       commandEncoder.writeTimestamp(this.#querySet, 0)
@@ -565,6 +597,8 @@ class Spark {
       this.#generateMipmaps(commandEncoder, inputTexture, mipmapCount, width, height, srgb)
     }
 
+    commandEncoder.popDebugGroup?.();
+
     console.timeEnd("create input texture")
 
     // Allocate output texture.
@@ -590,6 +624,8 @@ class Spark {
 
     // Dispatch compute shader to encode the input texture in the output buffer.
     console.time("dispatch compute shader")
+
+    commandEncoder.pushDebugGroup?.("spark encode texture");
 
     let args = {}
     if (this.#querySet && typeof commandEncoder.writeTimestamp !== "function") {
@@ -661,6 +697,8 @@ class Spark {
     if (this.#querySet && typeof commandEncoder.writeTimestamp === "function") {
       commandEncoder.writeTimestamp(this.#querySet, 1)
     }
+
+    commandEncoder.popDebugGroup?.();
 
     this.#device.queue.submit([commandEncoder.finish()])
 
@@ -766,7 +804,10 @@ class Spark {
       // Safari: Copies from the query buffer to the readback buffer crash on Safari prior version 26.
       // Firefox: these createBuffers cause a device lost during shader module compilation. Maybe only on MacOS?
       if ((!webkitVersion || webkitVersion >= 26) && !firefoxVersion) {
-        this.#querySet = this.#device.createQuerySet({ type: "timestamp", count: 2 })
+        this.#querySet = this.#device.createQuerySet({
+          type: "timestamp",
+          count: 2
+        })
 
         this.#queryBuffer = this.#device.createBuffer({
           size: 16, // 2 timestamps × 8 bytes each
@@ -909,7 +950,9 @@ class Spark {
   }
 
   async #getBestMatchingFormat(options, image) {
-    if (!options.format || options.format == "auto") {
+    if (options.format == undefined) {
+      options.format = "rgb"
+    } else if (options.format == "auto") {
       if (options.alpha) {
         if (this.#isFormatSupported(SparkFormat.BC7_RGBA)) return SparkFormat.BC7_RGBA
         if (this.#isFormatSupported(SparkFormat.ASTC_4x4_RGBA)) return SparkFormat.ASTC_4x4_RGBA
@@ -920,6 +963,9 @@ class Spark {
         if (this.#isFormatSupported(SparkFormat.ASTC_4x4_RGB)) return SparkFormat.ASTC_4x4_RGB
         if (this.#isFormatSupported(SparkFormat.BC1_RGB)) return SparkFormat.BC1_RGB
         if (this.#isFormatSupported(SparkFormat.ETC2_RGB)) return SparkFormat.ETC2_RGB
+      } else if (options.normal) {
+        if (this.#isFormatSupported(SparkFormat.BC5_RG)) return SparkFormat.BC5_RG
+        if (this.#isFormatSupported(SparkFormat.EAC_RG)) return SparkFormat.EAC_RG
       } else {
         let channelCount
         if (image instanceof GPUTexture) {
@@ -960,20 +1006,21 @@ class Spark {
       return SparkFormatMap[options.format]
     }
 
+    // Formats are sorted by number of channel and quality.
     const preferenceOrder = [
       "bc4-r",
+      "eac-r",
       "bc5-rg",
+      "eac-rg",
       "bc7-rgb",
-      "bc7-rgba",
       "bc1-rgb",
-      "bc3-rgba",
       "astc-rgb",
       "astc-4x4-rgb",
+      "etc2-rgb",
+      "bc7-rgba",
       "astc-rgba",
       "astc-4x4-rgba",
-      "eac-r",
-      "eac-rg",
-      "etc2-rgb",
+      "bc3-rgba",
       "etc2-rgba"
     ]
 
@@ -1013,7 +1060,7 @@ class Spark {
 
     if (!opaque) return 4
     if (grayscale) return 1
-    if (4 * invalidNormalCount < count) return 2
+    if (4 * 4 * invalidNormalCount < count) return 2
     return 3
   }
 
