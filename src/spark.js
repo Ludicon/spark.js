@@ -534,6 +534,8 @@ class Spark {
 
     const commandEncoder = this.#device.createCommandEncoder()
 
+    commandEncoder.pushDebugGroup?.("spark process texture");
+
     if (this.#querySet && typeof commandEncoder.writeTimestamp === "function") {
       commandEncoder.writeTimestamp(this.#querySet, 0)
     }
@@ -595,6 +597,8 @@ class Spark {
       this.#generateMipmaps(commandEncoder, inputTexture, mipmapCount, width, height, srgb)
     }
 
+    commandEncoder.popDebugGroup?.();
+
     console.timeEnd("create input texture")
 
     // Allocate output texture.
@@ -620,6 +624,8 @@ class Spark {
 
     // Dispatch compute shader to encode the input texture in the output buffer.
     console.time("dispatch compute shader")
+
+    commandEncoder.pushDebugGroup?.("spark encode texture");
 
     let args = {}
     if (this.#querySet && typeof commandEncoder.writeTimestamp !== "function") {
@@ -691,6 +697,8 @@ class Spark {
     if (this.#querySet && typeof commandEncoder.writeTimestamp === "function") {
       commandEncoder.writeTimestamp(this.#querySet, 1)
     }
+
+    commandEncoder.popDebugGroup?.();
 
     this.#device.queue.submit([commandEncoder.finish()])
 
