@@ -101,8 +101,6 @@
       fn main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
           var color = textureSampleLevel(t_diffuse, s_diffuse, texCoord, 0.0).xyz;
 
-          color = select(1.055 * pow(color, vec3f(1.0 / 2.4)) - 0.055, color * 12.92, color <= vec3f(0.0031308));
-
           return vec4f(color, 1.0);
       }`;
 
