@@ -20,6 +20,6 @@ export default [
     }
   },
   {
-    ignores: ["dist/", "node_modules/", "examples/three.*"]
+    ignores: ["dist/", "node_modules/"]
   }
 ]
