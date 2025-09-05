@@ -10,7 +10,7 @@ It enables the use of standard image formats in WebGPU applications transcoding 
 
 > [Try the demo viewer](https://ludicon.com/sparkjs/viewer/)
 
---- 
+---
 
 ## Installation
 
@@ -50,7 +50,7 @@ npm install
 npm run build
 
 # Development mode with watch
-npm run dev
+npm run watch
 ```
 
 
@@ -59,13 +59,18 @@ npm run dev
 To run local examples:
 
 ```bash
-npm run build
-npm run serve
+npm run dev
 ```
 
-And visit `https://localhost:5174/examples/basic.html`.
+And visit `http://localhost:5174/examples/basic.html`.
 
-> Note: HTTPS is required to enable WebGPU features
+> Note: Browsers treat http://localhost as a secure context, so HTTPS is not required when testing locally on the same machine. However, to access the dev server from another device you must enable HTTPS for WebGPU features to work.
+>
+> To run the server with HTTPS, set the environment variable `HTTPS` to `true` before starting the server:
+>
+> ```bash
+> HTTPS=true npm run serve
+> ```
 
 
 ## Documentation
@@ -83,8 +88,18 @@ Load an image and encode it to a compressed GPU texture.
   Configuration options for encoding:
 
   - **`format`** (`string`)
-    Desired block compression format. You can use any of the WebGPU format names or an abreviated form such as `"bc7"` or `"astc"`.
-    If omitted, the format is selected based on device capabilities choosing he highest quality format available.
+    Desired block compression format. The format can be specified in several different ways:
+
+      - A channel mask indicating the number of channels in your input: `"rgba"`, `"rgb"`, `"rg"` or `"r"`, the actual format is selected based on the device capabilities.
+
+      - An explicit WebGPU BC, ETC or ASTC format name, or an abbreviated form such as `"bc7"` or `"astc"`. Note, spark.js only supports 4x4 and LDR formats. By default 
+
+      - If you specify `auto`, the input texture is analyzed to detect the necessary number of channels. This has some overhead, it's always recommended to specify the format through one of the other methods. 
+    
+    Default: `rgb`.
+
+  - **`alpha`** 
+    Hint for the format selector. When an explicit channel mask is not provided, the channel mask is assumed to be `"rgb"`, providing 
 
   - **`mips`** or **`generateMipmaps`** (`boolean`)
     Whether to generate mipmaps. Currently mipmap generation uses a basic box filter in linear space. Default: `false`.
@@ -111,5 +126,4 @@ Load an image and encode it to a compressed GPU texture.
 - Use of the *Spark* shaders is covered under the <a href="https://ludicon.com/sparkjs/eula.html">*spark.js* EULA</a>. 
 
 See https://ludicon.com/sparkjs#Licensing for details on how to use *spark.js* in commercial projects. 
-
 
