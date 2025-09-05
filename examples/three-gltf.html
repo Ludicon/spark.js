@@ -61,7 +61,7 @@
     await renderer.init();
 
     // Create spark device
-    const spark = await Spark.create(device);
+    const spark = await Spark.create(device, { preload: ["rgb", "rg", "r"] });
 
     // Scene
     const scene = new THREE.Scene();
@@ -257,7 +257,11 @@
     const loader = new GLTFLoader()
     loader.register(parser => new GLTFSparkPlugin(parser, spark));
 
+    console.time("Load GLTF file")
+
     const gltf = await loader.loadAsync("./assets/DamagedHelmet.glb");
+
+    console.timeEnd("Load GLTF file")
 
     const box = new THREE.Box3().setFromObject(gltf.scene);
     const scale = box.getSize(new THREE.Vector3()).length();
