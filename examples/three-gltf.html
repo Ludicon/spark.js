@@ -12,13 +12,12 @@
 
 <body>
   <script type="module">
-    import * as THREE from '../../three.js/build/three.webgpu.js';
-    import { OrbitControls } from '../../three.js/examples/jsm/controls/OrbitControls.js';
-    import { GLTFLoader } from '../../three.js/examples/jsm/loaders/GLTFLoader.js';
-    import { RoomEnvironment } from '../../three.js/examples/jsm/environments/RoomEnvironment.js';
-    import { DRACOLoader } from '../../three.js/examples/jsm/loaders/DRACOLoader.js';
+    import * as THREE from "three/webgpu";
+    import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+    import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+    import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
-    import { Spark } from '../dist/index.esm.js';
+    import { Spark } from "@ludicon/spark.js";
 
     const errorHTML = `
       <div style="color: #FFF; padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
@@ -258,21 +257,9 @@
     const loader = new GLTFLoader()
     loader.register(parser => new GLTFSparkPlugin(parser, spark));
 
-    // Hook up DRACOLoader
-    const dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath('./libs/draco/'); 
-    loader.setDRACOLoader(dracoLoader);
-
     const gltf = await loader.loadAsync("./assets/DamagedHelmet.glb");
-    //const gltf = await loader.loadAsync( './assets/LittlestTokyo.glb' );
-    //const gltf = await loader.loadAsync( './assets/FlightHelmet.gltf' );
-    //const gltf = await loader.loadAsync( './assets/SciFiHelmet.gltf' );
-    //const gltf = await loader.loadAsync( './assets/forest_house.glb' );
-
 
     const box = new THREE.Box3().setFromObject(gltf.scene);
-    const offset = box.getCenter(new THREE.Vector3());
-    //gltf.scene.position.sub(offset);
     const scale = box.getSize(new THREE.Vector3()).length();
     gltf.scene.scale.multiplyScalar(4 / scale);
 
