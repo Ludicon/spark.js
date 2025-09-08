@@ -618,7 +618,6 @@ class Spark {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
     })
 
-
     // Dispatch compute shader to encode the input texture in the output buffer.
     console.time("dispatch compute shader")
 
@@ -636,9 +635,9 @@ class Spark {
     }
 
     // Make sure the pipeline is loaded. Wait if necessary.
-    const pipeline = await pipelinePromise;
+    const pipeline = await pipelinePromise
 
-    const pass = commandEncoder.beginComputePass(args)    
+    const pass = commandEncoder.beginComputePass(args)
     pass.setPipeline(pipeline)
 
     for (let m = 0; m < mipmapCount; m++) {
@@ -961,7 +960,6 @@ class Spark {
   }
 
   #getPreferredFormat(format) {
-
     // First check if the format is an explicit format.
     const explicitFormat = SparkFormatMap[format]
     if (explicitFormat != undefined && this.#isFormatSupported(explicitFormat)) {
@@ -1052,7 +1050,7 @@ class Spark {
       throw new Error(`Unsupported format: ${options.format}`)
     }
 
-    return format;
+    return format
   }
 
   #detectChannelCount(imageData) {
