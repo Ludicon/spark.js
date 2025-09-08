@@ -8,7 +8,8 @@
   "exports": {
     ".": {
       "import": "./dist/spark.esm.js"
-    }
+    },
+    "./three-gltf": "./src/three-gltf.js"
   },
   "files": [
     "dist",
@@ -66,6 +67,9 @@
   },
   "peerDependencies": {
     "three": "^0.180.0"
+  },
+  "peerDependenciesMeta": {
+    "three": { "optional": true }
   },
   "publishConfig": {
     "access": "public"
