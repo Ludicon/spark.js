@@ -1,6 +1,6 @@
 {
   "name": "@ludicon/spark.js",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Real-Time GPU Texture Codecs for the Web",
   "main": "dist/spark.esm.js",
   "module": "dist/spark.esm.js",
@@ -69,7 +69,9 @@
     "three": "^0.180.0"
   },
   "peerDependenciesMeta": {
-    "three": { "optional": true }
+    "three": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"
