@@ -336,6 +336,8 @@ class Spark {
   #queryBuffer
   #queryReadbackBuffer
 
+  #encodeCounter = 0
+
   /**
    * Initialize the encoder by detecting available compression formats.
    * @param {GPUDevice} device - WebGPU device.
@@ -555,7 +557,8 @@ class Spark {
     // a single temporary texture that is reused for all texture uploads, and resized/freed as needed.
 
     // Allocate input texture. @@ This texture could be persistent.
-    console.time("create input texture")
+    const counter = this.#encodeCounter++
+    console.time("create input texture #" + counter)
 
     let inputUsage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.STORAGE_BINDING
 
@@ -567,7 +570,7 @@ class Spark {
 
     const commandEncoder = this.#device.createCommandEncoder()
 
-    commandEncoder.pushDebugGroup?.("spark process texture");
+    commandEncoder.pushDebugGroup?.("spark process texture")
 
     if (this.#querySet && typeof commandEncoder.writeTimestamp === "function") {
       commandEncoder.writeTimestamp(this.#querySet, 0)
@@ -630,9 +633,9 @@ class Spark {
       this.#generateMipmaps(commandEncoder, inputTexture, mipmapCount, width, height, srgb)
     }
 
-    commandEncoder.popDebugGroup?.();
+    commandEncoder.popDebugGroup?.()
 
-    console.timeEnd("create input texture")
+    console.timeEnd("create input texture #" + counter)
 
     // Allocate output texture.
     const outputTexture = this.#device.createTexture({
@@ -649,9 +652,9 @@ class Spark {
     })
 
     // Dispatch compute shader to encode the input texture in the output buffer.
-    console.time("dispatch compute shader")
+    console.time("dispatch compute shader #" + counter)
 
-    commandEncoder.pushDebugGroup?.("spark encode texture");
+    commandEncoder.pushDebugGroup?.("spark encode texture")
 
     let args = {}
     if (this.#querySet && typeof commandEncoder.writeTimestamp !== "function") {
@@ -727,11 +730,11 @@ class Spark {
       commandEncoder.writeTimestamp(this.#querySet, 1)
     }
 
-    commandEncoder.popDebugGroup?.();
+    commandEncoder.popDebugGroup?.()
 
     this.#device.queue.submit([commandEncoder.finish()])
 
-    console.timeEnd("dispatch compute shader")
+    console.timeEnd("dispatch compute shader #" + counter)
 
     // Destroy temporary buffers/textures after the work is done.
     // this.#device.queue.onSubmittedWorkDone().then(() => {
