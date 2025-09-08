@@ -253,17 +253,40 @@ function imageToByteArray(image) {
   return new Uint8Array(imageData.data.buffer)
 }
 
-function loadImage(url) {
-  return new Promise(function (resolve, reject) {
-    const image = new Image()
+function isSvgUrl(url) {
+  return /\.svg(?:$|\?)/i.test(url) || /^data:image\/svg\+xml[,;]/i.test(url)
+}
 
-    image.crossOrigin = "anonymous"
-    image.onload = function () {
-      resolve(image)
-    }
-    image.onerror = reject
-    image.src = url
+function loadImageElement(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = "anonymous"
+    img.decoding = "async" // hint to decode off the main thread when possible
+    img.onload = () => resolve(img) // returns HTMLImageElement
+    img.onerror = reject
+    img.src = url
   })
+}
+
+async function loadImageBitmap(url, opts = {}) {
+  const res = await fetch(url, { mode: "cors" })
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
+  const blob = await res.blob()
+
+  // Note: createImageBitmap doesn't support image/svg+xml
+  return createImageBitmap(blob, {
+    imageOrientation: opts.flipY ? "flipY" : "none",
+    colorSpaceConversion: opts.colorSpaceConversion ?? "none"
+  })
+}
+
+function loadImage(url) {
+  if (isSvgUrl(url)) {
+    return loadImageElement(url)
+  } else {
+    // createImageBitmap appears to be slightly faster, but does not handle svg files.
+    return loadImageBitmap(url)
+  }
 }
 
 // This is prescribed by WebGPU.
@@ -428,15 +451,18 @@ class Spark {
    * Try to determine the best compression options automatically. Do not use this in production, this is
    * for the convenience of the spark.js image viewer only.
    *
-   * @param {string | HTMLImageElement | HTMLCanvasElement | Blob | ArrayBuffer | GPUTexture} source - Image input.
+   * @param {string | HTMLImageElement | ImageBitmap | GPUTexture} source - Image input.
    * @param {Object} options - Encoding options.
    * @returns {Object} - Recommended encoding options with an explicit encoding format.
    */
   async selectPreferredOptions(source, options = {}) {
     // Only load the image if the format has not been specified by the user.
     if (options.format == undefined || options.format == "auto") {
-      const image = source instanceof Image || source instanceof GPUTexture ? source : await loadImage(source)
-      
+      const image =
+        source instanceof Image || source instanceof ImageBitmap || source instanceof GPUTexture
+          ? source
+          : await loadImage(source)
+
       options.format = "auto"
       const format = await this.#getBestMatchingFormat(options, image)
 
@@ -459,8 +485,8 @@ class Spark {
   /**
    * Load an image and encode it to a compressed GPU texture.
    *
-   * @param {GPUTexture | string | HTMLImageElement | HTMLCanvasElement | Blob | ArrayBuffer} source
-   *        The image to encode. Can be a GPUTexture, URL, DOM image/canvas, binary buffer, or Blob.
+   * @param {string | HTMLImageElement | ImageBitmap | GPUTexture} source
+   *        The image to encode. Can be a GPUTexture, URL, DOM image or ImageBitmap.
    *
    * @param {Object} [options] - Optional configuration for encoding.
    *
@@ -498,7 +524,11 @@ class Spark {
   async encodeTexture(source, options = {}) {
     assert(this.#device, "Spark is not initialized")
 
-    const image = source instanceof Image || source instanceof GPUTexture ? source : await loadImage(source)
+    // @@ TODO: Add support for canvas elements, blobs and ArrayBuffers.
+    const image =
+      source instanceof Image || source instanceof ImageBitmap || source instanceof GPUTexture
+        ? source
+        : await loadImage(source)
     console.log("Loaded image", image)
 
     const format = await this.#getBestMatchingFormat(options, image)
@@ -621,7 +651,6 @@ class Spark {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
     })
 
-
     // Dispatch compute shader to encode the input texture in the output buffer.
     console.time("dispatch compute shader #" + counter)
 
@@ -639,9 +668,9 @@ class Spark {
     }
 
     // Make sure the pipeline is loaded. Wait if necessary.
-    const pipeline = await pipelinePromise;
+    const pipeline = await pipelinePromise
 
-    const pass = commandEncoder.beginComputePass(args)    
+    const pass = commandEncoder.beginComputePass(args)
     pass.setPipeline(pipeline)
 
     for (let m = 0; m < mipmapCount; m++) {
@@ -964,7 +993,6 @@ class Spark {
   }
 
   #getPreferredFormat(format) {
-
     // First check if the format is an explicit format.
     const explicitFormat = SparkFormatMap[format]
     if (explicitFormat != undefined && this.#isFormatSupported(explicitFormat)) {
@@ -1055,7 +1083,7 @@ class Spark {
       throw new Error(`Unsupported format: ${options.format}`)
     }
 
-    return format;
+    return format
   }
 
   #detectChannelCount(imageData) {
