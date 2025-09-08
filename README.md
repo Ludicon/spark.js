@@ -62,7 +62,7 @@ To run local examples:
 npm run dev
 ```
 
-And visit `http://localhost:5174/examples/basic.html`.
+This will open `http://localhost:5174/examples/index.thml` where you can browse the examples.
 
 > Note: Browsers treat http://localhost as a secure context, so HTTPS is not required when testing locally on the same machine. However, to access the dev server from another device you must enable HTTPS for WebGPU features to work.
 >
@@ -116,6 +116,38 @@ Load an image and encode it to a compressed GPU texture.
 #### Returns
 
 - `Promise<GPUTexture>` — the compressed GPU texture, ready for use in WebGPU.
+
+
+## Integration with three.js
+
+Using spark.js with [three.js](https://threejs.org/) is straightforward. You can encode textures with Spark and expose them to three.js as external textures:
+
+```js
+// Load and encode texture using spark:
+const gpuTexture = await spark.encodeTexture(textureUrl, { srgb: true, flipY: true });
+
+// Wrap the GPUTexture for three.js
+const externalTex = new THREE.ExternalTexture(gpuTexture);
+
+// Then use as any other texture:
+const material = new THREE.MeshBasicMaterial({ map: externalTex });
+
+```
+
+To facilitate the use of Spark when loading GLTF assets, import the provided helper:
+
+```jsd
+import { registerSparkLoader } from "@ludicon/spark.js/three-gltf";
+```
+
+Then register Spark with an existing GLTFLoader instance:
+
+```js
+const loader = new GLTFLoader()
+registerSparkLoader(loader, spark)
+```
+
+After registration, the loader will automatically encode textures with Spark whenever applicable.
 
 
 ## License
