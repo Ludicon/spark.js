@@ -92,17 +92,17 @@ Load an image and encode it to a compressed GPU texture.
 
       - A channel mask indicating the number of channels in your input: `"rgba"`, `"rgb"`, `"rg"` or `"r"`, the actual format is selected based on the device capabilities.
 
-      - An explicit WebGPU BC, ETC or ASTC format name, or an abbreviated form such as `"bc7"` or `"astc"`. Note, spark.js only supports 4x4 and LDR formats. By default 
+      - An explicit WebGPU BC, ETC or ASTC format name, or an abbreviated form such as `"bc7"` or `"astc"`. Note: only 4x4 LDR formats are supported. 
 
       - If you specify `auto`, the input texture is analyzed to detect the necessary number of channels. This has some overhead, it's always recommended to specify the format through one of the other methods. 
     
     Default: `rgb`.
 
   - **`alpha`** 
-    Hint for the format selector. When an explicit channel mask is not provided, the channel mask is assumed to be `"rgb"`, providing 
+    Hint for the automatic format selector. When no explicit format is provided, the format is assumed to be `"rgb"`. Supplying `alpha: true` will default to "rgba" instead.
 
   - **`mips`** or **`generateMipmaps`** (`boolean`)
-    Whether to generate mipmaps. Currently mipmap generation uses a basic box filter in linear space. Default: `false`.
+    Whether to generate mipmaps. Mipmaps are generated with a basic box filter in linear space. Default: `false`.
 
   - **`srgb`** (`boolean`)
     Whether to encode the image using an as sRGB format. This also affects mipmap generation. The `srgb` mode can also be inferred from the `format`. Default: `false`. 
@@ -115,7 +115,8 @@ Load an image and encode it to a compressed GPU texture.
 
 #### Returns
 
-- `Promise<GPUTexture>` — the compressed GPU texture, ready for use in WebGPU.
+- `Promise<GPUTexture>` 
+  A promise resolving to the encoded WebGPU texture.
 
 
 ## Integration with three.js
