@@ -70,34 +70,58 @@ class GLTFSparkPlugin {
       assignTexture(materialDef.pbrMetallicRoughness?.metallicRoughnessTexture?.index, Channel.G | Channel.B)
 
       // KHR_materials_anisotropy - RG contains direction, B contains strength.
-      assignTexture(materialDef.anisotropyTexture?.index, Channel.RGB)
+      const anisotropyDef = materialDef.extensions?.KHR_materials_anisotropy
+      if (anisotropyDef) {
+        assignTexture(materialDef.anisotropyTexture?.index, Channel.RGB)
+      }      
 
       // KHR_materials_clearcoat
-      assignTexture(materialDef.clearcoatTexture?.index, Channel.RGB, THREE.SRGBColorSpace)
-      assignTexture(materialDef.clearcoatRoughnessTexture?.index, Channel.R)
-      assignTexture(materialDef.clearcoatNormalTexture?.index, Channel.RG, THREE.NoColorSpace, true)
+      const clearcoatDef = materialDef.extensions?.KHR_materials_clearcoat
+      if (clearcoatDef) {
+        assignTexture(clearcoatDef.clearcoatTexture?.index, Channel.RGB, THREE.SRGBColorSpace)
+        assignTexture(clearcoatDef.clearcoatRoughnessTexture?.index, Channel.R)
+        assignTexture(clearcoatDef.clearcoatNormalTexture?.index, Channel.RG, THREE.NoColorSpace, true)
+      }
 
       // KHR_materials_diffuse_transmission
-      assignTexture(materialDef.diffuseTransmissionTexture?.index, Channel.A)
-      assignTexture(materialDef.diffuseTransmissionColorTexture?.index, Channel.RGB, THREE.SRGBColorSpace)
+      const diffuseTransmissionDef = materialDef.extensions?.KHR_materials_diffuse_transmission
+      if (diffuseTransmissionDef) {
+        assignTexture(diffuseTransmissionDef.diffuseTransmissionTexture?.index, Channel.A)
+        assignTexture(diffuseTransmissionDef.diffuseTransmissionColorTexture?.index, Channel.RGB, THREE.SRGBColorSpace)
+      }
 
       // KHR_materials_iridescence
-      assignTexture(materialDef.iridescenceTexture?.index, Channel.R)
-      assignTexture(materialDef.iridescenceThicknessTexture?.index, Channel.G)
+      const iridescenceDef = materialDef.extensions?.KHR_materials_iridescence
+      if (iridescenceDef) {
+        assignTexture(iridescenceDef.iridescenceTexture?.index, Channel.R)
+        assignTexture(iridescenceDef.iridescenceThicknessTexture?.index, Channel.G)
+      }
 
       // KHR_materials_sheen
-      assignTexture(materialDef.sheenColorTexture?.index, Channel.RGB, THREE.SRGBColorSpace)
-      assignTexture(materialDef.sheenRoughnessTextureIndex?.index, Channel.A)
+      const sheenDef = materialDef.extensions?.KHR_materials_sheen
+      if (sheenDef) {      
+        assignTexture(materialDef.sheenColorTexture?.index, Channel.RGB, THREE.SRGBColorSpace)
+        assignTexture(materialDef.sheenRoughnessTextureIndex?.index, Channel.A)
+      }
 
       // KHR_materials_specular
-      assignTexture(materialDef.specularTexture?.index, Channel.RGB, THREE.SRGBColorSpace)
-      assignTexture(materialDef.specularColorTexture?.index, Channel.A)
+      const specularDef = materialDef.extensions?.KHR_materials_specular
+      if (specularDef) {      
+        assignTexture(specularDef.specularTexture?.index, Channel.RGB, THREE.SRGBColorSpace)
+        assignTexture(specularDef.specularColorTexture?.index, Channel.A)
+      }
 
       // KHR_materials_transmission
-      assignTexture(materialDef.transmissionTexture?.index, Channel.R)
+      const transmissionDef = materialDef.extensions?.KHR_materials_transmission
+      if (transmissionDef) {      
+        assignTexture(transmissionDef.transmissionTexture?.index, Channel.R)
+      }
 
       // KHR_materials_volume
-      assignTexture(materialDef.thicknessTexture?.index, Channel.G)
+      const volumeDef = materialDef.extensions?.KHR_materials_volume
+      if (volumeDef) {      
+        assignTexture(volumeDef.thicknessTexture?.index, Channel.G)
+      }
     }
 
     this.textureColorSpaces = textureColorSpaces
