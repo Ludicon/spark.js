@@ -67,7 +67,7 @@
     "vite": "^7.0.0"
   },
   "peerDependencies": {
-    "three": "^0.180.0"
+    "three": ">=0.180.0"
   },
   "peerDependenciesMeta": {
     "three": {
