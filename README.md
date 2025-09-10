@@ -64,7 +64,8 @@ npm run dev
 
 This will open `http://localhost:5174/examples/index.thml` where you can browse the examples.
 
-> Note: Browsers treat http://localhost as a secure context, so HTTPS is not required when testing locally on the same machine. However, to access the dev server from another device you must enable HTTPS for WebGPU features to work.
+> [!NOTE]
+> Browsers treat http://localhost as a secure context, so HTTPS is not required when testing locally on the same machine. However, to access the dev server from another device you must enable HTTPS for WebGPU features to work.
 >
 > To run the server with HTTPS, set the environment variable `HTTPS` to `true` before starting the server:
 >
