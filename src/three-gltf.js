@@ -72,7 +72,7 @@ class GLTFSparkPlugin {
       // KHR_materials_anisotropy - RG contains direction, B contains strength.
       const anisotropyDef = materialDef.extensions?.KHR_materials_anisotropy
       if (anisotropyDef) {
-        assignTexture(materialDef.anisotropyTexture?.index, Channel.RGB)
+        assignTexture(anisotropyDef.anisotropyTexture?.index, Channel.RGB)
       }      
 
       // KHR_materials_clearcoat
@@ -100,8 +100,8 @@ class GLTFSparkPlugin {
       // KHR_materials_sheen
       const sheenDef = materialDef.extensions?.KHR_materials_sheen
       if (sheenDef) {      
-        assignTexture(materialDef.sheenColorTexture?.index, Channel.RGB, THREE.SRGBColorSpace)
-        assignTexture(materialDef.sheenRoughnessTextureIndex?.index, Channel.A)
+        assignTexture(sheenDef.sheenColorTexture?.index, Channel.RGB, THREE.SRGBColorSpace)
+        assignTexture(sheenDef.sheenRoughnessTextureIndex?.index, Channel.A)
       }
 
       // KHR_materials_specular
