@@ -73,7 +73,7 @@ class GLTFSparkPlugin {
       const anisotropyDef = materialDef.extensions?.KHR_materials_anisotropy
       if (anisotropyDef) {
         assignTexture(anisotropyDef.anisotropyTexture?.index, Channel.RGB)
-      }      
+      }
 
       // KHR_materials_clearcoat
       const clearcoatDef = materialDef.extensions?.KHR_materials_clearcoat
@@ -99,27 +99,27 @@ class GLTFSparkPlugin {
 
       // KHR_materials_sheen
       const sheenDef = materialDef.extensions?.KHR_materials_sheen
-      if (sheenDef) {      
+      if (sheenDef) {
         assignTexture(sheenDef.sheenColorTexture?.index, Channel.RGB, THREE.SRGBColorSpace)
         assignTexture(sheenDef.sheenRoughnessTextureIndex?.index, Channel.A)
       }
 
       // KHR_materials_specular
       const specularDef = materialDef.extensions?.KHR_materials_specular
-      if (specularDef) {      
+      if (specularDef) {
         assignTexture(specularDef.specularTexture?.index, Channel.RGB, THREE.SRGBColorSpace)
         assignTexture(specularDef.specularColorTexture?.index, Channel.A)
       }
 
       // KHR_materials_transmission
       const transmissionDef = materialDef.extensions?.KHR_materials_transmission
-      if (transmissionDef) {      
+      if (transmissionDef) {
         assignTexture(transmissionDef.transmissionTexture?.index, Channel.R)
       }
 
       // KHR_materials_volume
       const volumeDef = materialDef.extensions?.KHR_materials_volume
-      if (volumeDef) {      
+      if (volumeDef) {
         assignTexture(volumeDef.thicknessTexture?.index, Channel.G)
       }
     }
