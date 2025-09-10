@@ -1,6 +1,6 @@
 {
   "name": "@ludicon/spark.js",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Real-Time GPU Texture Codecs for the Web",
   "main": "dist/spark.esm.js",
   "module": "dist/spark.esm.js",
