@@ -138,7 +138,7 @@ const material = new THREE.MeshBasicMaterial({ map: externalTex });
 
 To facilitate the use of Spark when loading GLTF assets, import the provided helper:
 
-```jsd
+```js
 import { registerSparkLoader } from "@ludicon/spark.js/three-gltf";
 ```
 
