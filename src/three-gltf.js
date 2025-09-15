@@ -11,17 +11,17 @@ const Channel = {
 }
 
 class GLTFSparkPlugin {
-  constructor(name, parser, spark) {
+  constructor(name, parser, spark, options) {
     this.name = name
     this.parser = parser
 
     this.loaders = {
-      ["rgba"]: new SparkLoader(parser.fileLoader.manager, spark, "rgba"),
-      ["rgba-srgb"]: new SparkLoader(parser.fileLoader.manager, spark, "rgba", THREE.SRGBColorSpace),
-      ["rgb"]: new SparkLoader(parser.fileLoader.manager, spark, "rgb"),
-      ["rgb-srgb"]: new SparkLoader(parser.fileLoader.manager, spark, "rgb", THREE.SRGBColorSpace),
-      ["rg"]: new SparkLoader(parser.fileLoader.manager, spark, "rg"),
-      ["r"]: new SparkLoader(parser.fileLoader.manager, spark, "r"),
+      ["rgba"]: new SparkLoader(parser.fileLoader.manager, spark, options, "rgba"),
+      ["rgba-srgb"]: new SparkLoader(parser.fileLoader.manager, spark, options, "rgba", THREE.SRGBColorSpace),
+      ["rgb"]: new SparkLoader(parser.fileLoader.manager, spark, options, "rgb"),
+      ["rgb-srgb"]: new SparkLoader(parser.fileLoader.manager, spark, options, "rgb", THREE.SRGBColorSpace),
+      ["rg"]: new SparkLoader(parser.fileLoader.manager, spark, options, "rg"),
+      ["r"]: new SparkLoader(parser.fileLoader.manager, spark, options, "r"),
       [""]: new THREE.TextureLoader()
     }
 
@@ -158,20 +158,22 @@ class GLTFSparkPlugin {
 }
 
 class SparkLoader extends THREE.TextureLoader {
-  constructor(manager, spark, format, colorSpace = THREE.NoColorSpace) {
+  constructor(manager, spark, options, format, colorSpace = THREE.NoColorSpace) {
     super(manager)
     this.spark = spark
     this.format = format
     this.colorSpace = colorSpace
+    this.options = options
   }
 
   load(url, onLoad, onProgress, onError) {
     const format = this.format
     const srgb = this.colorSpace === THREE.SRGBColorSpace
     const mips = true
+    const normal = this.format == "rg"
 
     this.spark
-      .encodeTexture(url, { format, srgb, mips })
+      .encodeTexture(url, { format, srgb, mips, normal, preferLowQuality: this.options.preferLowQuality })
       .then(gpuTexture => {
         const texture = new THREE.ExternalTexture(gpuTexture)
         if (this.format == "rg" && "NormalRGPacking" in THREE) {
@@ -195,7 +197,7 @@ class SparkLoader extends THREE.TextureLoader {
   }
 }
 
-export function registerSparkLoader(loader, spark) {
+export function registerSparkLoader(loader, spark, options = {}) {
   // Remove existing webp and avif plugins:
   for (let i = 0; i < loader.pluginCallbacks.length; i++) {
     const plugin = loader.pluginCallbacks[i](loader)
@@ -207,7 +209,7 @@ export function registerSparkLoader(loader, spark) {
   }
 
   // Install plugin for standard textures, and textures using webp and avif extensions.
-  loader.register(parser => new GLTFSparkPlugin("spark", parser, spark))
-  loader.register(parser => new GLTFSparkPlugin("EXT_texture_webp", parser, spark))
-  loader.register(parser => new GLTFSparkPlugin("EXT_texture_avif", parser, spark))
+  loader.register(parser => new GLTFSparkPlugin("spark", parser, spark, options))
+  loader.register(parser => new GLTFSparkPlugin("EXT_texture_webp", parser, spark, options))
+  loader.register(parser => new GLTFSparkPlugin("EXT_texture_avif", parser, spark, options))
 }

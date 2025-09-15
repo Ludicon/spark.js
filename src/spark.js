@@ -862,7 +862,7 @@ class Spark {
     if (preload) {
       let formatsToLoad
       if (Array.isArray(preload)) {
-        formatsToLoad = preload.map(n => this.#getPreferredFormat(n))
+        formatsToLoad = preload.map(n => this.#getPreferredFormat(n, false))
       } else {
         formatsToLoad = this.#supportedFormats
       }
@@ -992,7 +992,7 @@ class Spark {
     return this.#supportedFormats.has(format)
   }
 
-  #getPreferredFormat(format) {
+  #getPreferredFormat(format, preferLowQuality) {
     // First check if the format is an explicit format.
     const explicitFormat = SparkFormatMap[format]
     if (explicitFormat != undefined && this.#isFormatSupported(explicitFormat)) {
@@ -1000,7 +1000,25 @@ class Spark {
     }
 
     // Otherwise, try to match it based on the preferenceOrder. Formats are sorted by number of channel and quality.
-    const preferenceOrder = [
+    const preferenceOrder = preferLowQuality ?
+    [
+      "bc4-r",
+      "eac-r",
+      "bc5-rg",
+      "eac-rg",
+      "bc1-rgb",
+      "etc2-rgb",
+      "bc7-rgb",
+      "astc-rgb",
+      "astc-4x4-rgb",
+      "bc7-rgba",
+      "astc-rgba",
+      "astc-4x4-rgba",
+      "bc3-rgba",
+      "etc2-rgba"
+    ]
+    :    
+    [
       "bc4-r",
       "eac-r",
       "bc5-rg",
@@ -1078,7 +1096,7 @@ class Spark {
       throw new Error("No supported format found.")
     }
 
-    const format = this.#getPreferredFormat(options.format)
+    const format = this.#getPreferredFormat(options.format, options.preferLowQuality)
     if (format === undefined) {
       throw new Error(`Unsupported format: ${options.format}`)
     }
