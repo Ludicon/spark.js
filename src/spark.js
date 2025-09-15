@@ -653,7 +653,8 @@ class Spark {
     })
 
     // Dispatch compute shader to encode the input texture in the output buffer.
-    console.time("dispatch compute shader #" + counter)
+    const label = `dispatch compute shader '${SparkFormatName[format]}' #${counter}`;
+    console.time(label)
 
     commandEncoder.pushDebugGroup?.("spark encode texture")
 
@@ -735,7 +736,7 @@ class Spark {
 
     this.#device.queue.submit([commandEncoder.finish()])
 
-    console.timeEnd("dispatch compute shader #" + counter)
+    console.timeEnd(label)
 
     // Destroy temporary buffers/textures after the work is done.
     // this.#device.queue.onSubmittedWorkDone().then(() => {
