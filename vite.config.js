@@ -1,6 +1,7 @@
 import { defineConfig } from "vite"
 import { resolve } from "path"
 import basicSsl from "@vitejs/plugin-basic-ssl"
+import summary from 'rollup-plugin-summary';
 
 export default defineConfig({
   plugins: [basicSsl()],
@@ -16,6 +17,7 @@ export default defineConfig({
     },
     rollupOptions: {
       external: ["three"],
+      plugins: [summary({showGzippedSize:true, showBrotliSize:true})],
       output: {
         globals: {}
       }
