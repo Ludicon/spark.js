@@ -31,8 +31,11 @@ fn mipmap(@builtin(global_invocation_id) id : vec3<u32>) {
     }
 
     let size_rcp = vec2f(1.0) / vec2f(dstSize);
-    let uv0 = vec2f(id.xy) * size_rcp;
-    let uv1 = uv0 + size_rcp;
+
+    // We are not doing this yet, but in some cases we want to take 4 samples in order to apply alpha weighting,
+    // or to support non multiple of two textures.
+    let uv0 = (vec2f(id.xy) + vec2f(0.25)) * size_rcp;
+    let uv1 = uv0 + 0.5 * size_rcp;
 
     var color = vec4f(0.0);
     color += textureSampleLevel(src, smp, vec2f(uv0.x, uv0.y), 0);
@@ -40,6 +43,10 @@ fn mipmap(@builtin(global_invocation_id) id : vec3<u32>) {
     color += textureSampleLevel(src, smp, vec2f(uv0.x, uv1.y), 0);
     color += textureSampleLevel(src, smp, vec2f(uv1.x, uv1.y), 0);
     color *= 0.25; 
+
+    // This would be the single sample implementation:
+    // let uv = (vec2f(id.xy) + vec2f(0.5)) * size_rcp;
+    // var color = textureSampleLevel(src, smp, vec2f(uv.x, uv.y), 0);
 
     if (params.colorMode == 1) {
         color = linear_to_srgb_vec4(color);
