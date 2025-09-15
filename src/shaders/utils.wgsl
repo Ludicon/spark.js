@@ -1,5 +1,5 @@
 struct Params {
-    to_srgb: u32,
+    colorMode: u32,
 };
 
 @group(0) @binding(0) var src : texture_2d<f32>;
@@ -17,6 +17,10 @@ fn linear_to_srgb_vec3(c: vec3<f32>) -> vec3<f32> {
 
 fn linear_to_srgb_vec4(c: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(linear_to_srgb_vec3(c.xyz), c.w);
+}
+
+fn normalize_vec4(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(saturate(0.5 * normalize(2 * c.xyz - 1) + 0.5), c.w);
 }
 
 @compute @workgroup_size(8, 8)
@@ -37,8 +41,10 @@ fn mipmap(@builtin(global_invocation_id) id : vec3<u32>) {
     color += textureSampleLevel(src, smp, vec2f(uv1.x, uv1.y), 0);
     color *= 0.25; 
 
-    if (params.to_srgb != 0) {
+    if (params.colorMode == 1) {
         color = linear_to_srgb_vec4(color);
+    } else if (params.colorMode == 2) {
+        color = normalize_vec4(color);
     }
 
     textureStore(dst, id.xy, color);
@@ -54,8 +60,10 @@ fn resize(@builtin(global_invocation_id) id : vec3<u32>) {
     let uv = (vec2f(id.xy) + vec2f(0.5)) / vec2f(dstSize);
     var color = textureSampleLevel(src, smp, uv, 0);
 
-    if (params.to_srgb != 0) {
+    if (params.colorMode == 1) {
         color = linear_to_srgb_vec4(color);
+    } else if (params.colorMode == 2) {
+        color = normalize_vec4(color);
     }
 
     textureStore(dst, id.xy, color);
@@ -71,8 +79,10 @@ fn flipy(@builtin(global_invocation_id) id : vec3<u32>) {
     let uv = (vec2f(f32(id.x), f32(dstSize.y - 1u - id.y)) + vec2f(0.5)) / vec2f(dstSize);
     var color = textureSampleLevel(src, smp, uv, 0);
 
-    if (params.to_srgb != 0) {
+    if (params.colorMode == 1) {
         color = linear_to_srgb_vec4(color);
+    } else if (params.colorMode == 2) {
+        color = normalize_vec4(color);
     }
 
     textureStore(dst, id.xy, color);

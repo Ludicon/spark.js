@@ -331,8 +331,7 @@ class Spark {
   #detectChannelCountPipeline
 
   #defaultSampler
-  #srgbUniform
-  #noSrgbUniform
+  #uniformBuffer = new Array(3);
   #querySet
   #queryBuffer
   #queryReadbackBuffer
@@ -549,6 +548,7 @@ class Spark {
     // @@ Add a warning when the user requests srgb, but the selected format does not support it.
     // @@ We could potentially use a smaller format if the compressed format has fewer channels.
     const srgb = (options.srgb || options.format?.endsWith("srgb")) && SparkFormatIsRGB[format]
+    const colorMode = srgb ? 1 : (options.normal ? 2 : 0)
     const webgpuFormat = SparkWebGPUFormats[format] + (srgb ? "-srgb" : "")
     const viewFormats = srgb ? ["rgba8unorm", "rgba8unorm-srgb"] : ["rgba8unorm"]
 
@@ -611,7 +611,7 @@ class Spark {
           { width: image.width, height: image.height }
         )
 
-        this.#processInputTexture(commandEncoder, tmpTexture, inputTexture, width, height, srgb, options.flipY)
+        this.#processInputTexture(commandEncoder, tmpTexture, inputTexture, width, height, colorMode, options.flipY)
       }
     } else {
       if (image instanceof GPUTexture) {
@@ -631,7 +631,7 @@ class Spark {
     }
 
     if (mipmaps) {
-      this.#generateMipmaps(commandEncoder, inputTexture, mipmapCount, width, height, srgb)
+      this.#generateMipmaps(commandEncoder, inputTexture, mipmapCount, width, height, colorMode)
     }
 
     commandEncoder.popDebugGroup?.()
@@ -819,17 +819,14 @@ class Spark {
       minFilter: "linear"
     })
 
-    // Create two dummy buffers to enable/disable linear to sRGB conversion.
-    this.#srgbUniform = this.#device.createBuffer({
-      size: 4,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    })
-    this.#noSrgbUniform = this.#device.createBuffer({
-      size: 4,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    })
-    this.#device.queue.writeBuffer(this.#srgbUniform, 0, new Uint32Array([1]))
-    this.#device.queue.writeBuffer(this.#noSrgbUniform, 0, new Uint32Array([0]))
+    // Create three dummy buffers for each of the color modes: linear, srgb, normal.
+    for (let i = 0; i < 3; i++) {
+      this.#uniformBuffer[i] = this.#device.createBuffer({
+        size: 4,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+      });
+      this.#device.queue.writeBuffer(this.#uniformBuffer[i], 0, new Uint32Array([i]))
+    }
 
     if (this.#device.features.has("timestamp-query")) {
       const webkitVersion = getSafariVersion()
@@ -1199,7 +1196,7 @@ class Spark {
   }
 
   // Apply scaling and flipY transform.
-  async #processInputTexture(encoder, inputTexture, outputTexture, width, height, srgb, flipY) {
+  async #processInputTexture(encoder, inputTexture, outputTexture, width, height, colorMode, flipY) {
     const pass = encoder.beginComputePass()
 
     const pipeline = flipY ? this.#flipYPipeline : this.#resizePipeline
@@ -1214,7 +1211,7 @@ class Spark {
           resource: inputTexture.createView({
             baseMipLevel: 0,
             mipLevelCount: 1,
-            format: srgb ? "rgba8unorm-srgb" : "rgba8unorm",
+            format: colorMode == 1 ? "rgba8unorm-srgb" : "rgba8unorm",
             usage: GPUTextureUsage.TEXTURE_BINDING
           })
         },
@@ -1234,7 +1231,7 @@ class Spark {
         },
         {
           binding: 3,
-          resource: { buffer: srgb ? this.#srgbUniform : this.#noSrgbUniform }
+          resource: { buffer: this.#uniformBuffer[colorMode] }
         }
       ]
     })
@@ -1245,7 +1242,7 @@ class Spark {
     pass.end()
   }
 
-  async #generateMipmaps(encoder, texture, mipmapCount, width, height, srgb) {
+  async #generateMipmaps(encoder, texture, mipmapCount, width, height, colorMode) {
     const pass = encoder.beginComputePass()
     pass.setPipeline(this.#mipmapPipeline)
 
@@ -1254,13 +1251,13 @@ class Spark {
     for (let i = 0; i < mipmapCount - 1; i++) {
       w = Math.max(1, Math.floor(w / 2))
       h = Math.max(1, Math.floor(h / 2))
-      this.#generateMipLevel(pass, texture, i, i + 1, w, h, srgb)
+      this.#generateMipLevel(pass, texture, i, i + 1, w, h, colorMode)
     }
 
     pass.end()
   }
 
-  #generateMipLevel(pass, texture, srcLevel, dstLevel, width, height, srgb) {
+  #generateMipLevel(pass, texture, srcLevel, dstLevel, width, height, colorMode) {
     const bindGroup = this.#device.createBindGroup({
       layout: this.#mipmapPipeline.getBindGroupLayout(0),
       entries: [
@@ -1269,7 +1266,7 @@ class Spark {
           resource: texture.createView({
             baseMipLevel: srcLevel,
             mipLevelCount: 1,
-            format: srgb ? "rgba8unorm-srgb" : "rgba8unorm",
+            format: colorMode == 1 ? "rgba8unorm-srgb" : "rgba8unorm",
             usage: GPUTextureUsage.TEXTURE_BINDING
           })
         },
@@ -1289,7 +1286,7 @@ class Spark {
         },
         {
           binding: 3,
-          resource: { buffer: srgb ? this.#srgbUniform : this.#noSrgbUniform }
+          resource: { buffer: this.#uniformBuffer[colorMode] }
         }
       ]
     })
