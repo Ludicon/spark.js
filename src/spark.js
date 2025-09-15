@@ -324,7 +324,7 @@ class Spark {
   #detectChannelCountPipeline
 
   #defaultSampler
-  #uniformBuffer = new Array(3);
+  #uniformBuffer = new Array(3)
   #querySet
   #queryBuffer
   #queryReadbackBuffer
@@ -539,7 +539,7 @@ class Spark {
     // @@ Add a warning when the user requests srgb, but the selected format does not support it.
     // @@ We could potentially use a smaller format if the compressed format has fewer channels.
     const srgb = (options.srgb || options.format?.endsWith("srgb")) && SparkFormatIsRGB[format]
-    const colorMode = srgb ? 1 : (options.normal ? 2 : 0)
+    const colorMode = srgb ? 1 : options.normal ? 2 : 0
     const webgpuFormat = SparkWebGPUFormats[format] + (srgb ? "-srgb" : "")
     const viewFormats = srgb ? ["rgba8unorm", "rgba8unorm-srgb"] : ["rgba8unorm"]
 
@@ -644,7 +644,7 @@ class Spark {
     })
 
     // Dispatch compute shader to encode the input texture in the output buffer.
-    const label = `dispatch compute shader '${SparkFormatName[format]}' #${counter}`;
+    const label = `dispatch compute shader '${SparkFormatName[format]}' #${counter}`
     console.time(label)
 
     commandEncoder.pushDebugGroup?.("spark encode texture")
@@ -815,7 +815,7 @@ class Spark {
       this.#uniformBuffer[i] = this.#device.createBuffer({
         size: 4,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-      });
+      })
       this.#device.queue.writeBuffer(this.#uniformBuffer[i], 0, new Uint32Array([i]))
     }
 
@@ -941,7 +941,7 @@ class Spark {
           .replace(/\bf16\b/g, "f32")                 // replace f16 by f32
           .replace(/\bvec([234])h\b/g, "vec$1f")      // replace half vectors
           .replace(/\bmat([234]x[234])h/g, "mat$1f")  // replace half matrices
-          .replace(/\b(\d*\.\d+|\d+\.)h\b/g, "$1")    // replace half literals
+          .replace(/\b(\d*\.\d+|\d+\.)h\b/g, "$1") // replace half literals
       }
 
       const shaderModule = this.#device.createShaderModule({
@@ -990,36 +990,35 @@ class Spark {
     }
 
     // Otherwise, try to match it based on the preferenceOrder. Formats are sorted by number of channel and quality.
-    const preferenceOrder = preferLowQuality ?
-    [
-      "bc4-r",
-      "eac-r",
-      "bc5-rg",
-      "eac-rg",
-      "bc1-rgb",
-      "etc2-rgb",
-      "bc7-rgb",
-      "astc-rgb",
-      "astc-4x4-rgb",
-      "bc7-rgba",
-      "astc-rgba",
-      "astc-4x4-rgba"
-    ]
-    :    
-    [
-      "bc4-r",
-      "eac-r",
-      "bc5-rg",
-      "eac-rg",
-      "bc7-rgb",
-      "bc1-rgb",
-      "astc-rgb",
-      "astc-4x4-rgb",
-      "etc2-rgb",
-      "bc7-rgba",
-      "astc-rgba",
-      "astc-4x4-rgba"
-    ]
+    const preferenceOrder = preferLowQuality
+      ? [
+          "bc4-r",
+          "eac-r",
+          "bc5-rg",
+          "eac-rg",
+          "bc1-rgb",
+          "etc2-rgb",
+          "bc7-rgb",
+          "astc-rgb",
+          "astc-4x4-rgb",
+          "bc7-rgba",
+          "astc-rgba",
+          "astc-4x4-rgba"
+        ]
+      : [
+          "bc4-r",
+          "eac-r",
+          "bc5-rg",
+          "eac-rg",
+          "bc7-rgb",
+          "bc1-rgb",
+          "astc-rgb",
+          "astc-4x4-rgb",
+          "etc2-rgb",
+          "bc7-rgba",
+          "astc-rgba",
+          "astc-4x4-rgba"
+        ]
 
     // This allows selecting the best format using a substring like "rgb" or "astc"
     for (const key of preferenceOrder) {
