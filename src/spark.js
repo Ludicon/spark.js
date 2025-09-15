@@ -276,7 +276,8 @@ async function loadImageBitmap(url, opts = {}) {
   // Note: createImageBitmap doesn't support image/svg+xml
   return createImageBitmap(blob, {
     imageOrientation: opts.flipY ? "flipY" : "none",
-    colorSpaceConversion: opts.colorSpaceConversion ?? "none"
+    colorSpaceConversion: opts.colorSpaceConversion ?? "none",
+    premultiplyAlpha: "none"
   })
 }
 
