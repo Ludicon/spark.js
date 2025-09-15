@@ -8,10 +8,10 @@ const SparkFormat = {
   EAC_R: 4,
   EAC_RG: 5,
   ETC2_RGB: 6,
-  ETC2_RGBA: 7,
+  // ETC2_RGBA: 7,
   // ETC2_RGBM: 8,
   BC1_RGB: 9,
-  BC3_RGBA: 10,
+  // BC3_RGBA: 10,
   // BC3_YCoCg: 11,
   // BC3_RGBM: 12,
   BC4_R: 13,
@@ -29,10 +29,10 @@ const SparkFormatName = [
   /* 4  */ "eac-r", // EAC_R
   /* 5  */ "eac-rg", // EAC_RG
   /* 6  */ "etc2-rgb", // ETC2_RGB
-  /* 7  */ "etc2-rgba", // ETC2_RGBA
+  /* 7  */ null,
   /* 8  */ null,
   /* 9  */ "bc1-rgb", // BC1_RGB
-  /* 10 */ "bc3-rgba", // BC3_RGBA
+  /* 10 */ null,
   /* 11 */ null,
   /* 12 */ null,
   /* 13 */ "bc4-r", // BC4_R
@@ -50,10 +50,10 @@ const SparkShaderFiles = [
   /* 4  */ "spark_eac_r.wgsl", // EAC_R
   /* 5  */ "spark_eac_rg.wgsl", // EAC_RG
   /* 6  */ "spark_etc2_rgb.wgsl", // ETC2_RGB
-  /* 7  */ "spark_etc2_rgba.wgsl", // ETC2_RGBA
+  /* 7  */ null,
   /* 8  */ null,
   /* 9  */ "spark_bc1_rgb.wgsl", // BC1_RGB
-  /* 10 */ "spark_bc3_rgba.wgsl", // BC3_RGBA
+  /* 10 */ null,
   /* 11 */ null,
   /* 12 */ null,
   /* 13 */ "spark_bc4_r.wgsl", // BC4_R
@@ -71,10 +71,10 @@ const SparkBlockSize = [
   /* 4  */ 8, // EAC_R
   /* 5  */ 16, // EAC_RG
   /* 6  */ 8, // ETC2_RGB
-  /* 7  */ 16, // ETC2_RGBA
+  /* 7  */ 0,
   /* 8  */ 0,
   /* 9  */ 8, // BC1_RGB
-  /* 10 */ 16, // BC3_RGBA
+  /* 10 */ 0,
   /* 11 */ 0,
   /* 12 */ 0,
   /* 13 */ 8, // BC4_R
@@ -93,10 +93,10 @@ const SparkFormatRatio = [
   /* 4  */ 2, // EAC_R
   /* 5  */ 2, // EAC_RG
   /* 6  */ 8, // ETC2_RGB
-  /* 7  */ 4, // ETC2_RGBA
+  /* 7  */ 0,
   /* 8  */ 0,
   /* 9  */ 8, // BC1_RGB
-  /* 10 */ 4, // BC3_RGBA
+  /* 10 */ 0,
   /* 11 */ 0,
   /* 12 */ 0,
   /* 13 */ 2, // BC4_R
@@ -112,9 +112,7 @@ const SparkFormatMap = Object.freeze({
   "eac-r": SparkFormat.EAC_R,
   "eac-rg": SparkFormat.EAC_RG,
   "etc2-rgb": SparkFormat.ETC2_RGB,
-  "etc2-rgba": SparkFormat.ETC2_RGBA,
   "bc1-rgb": SparkFormat.BC1_RGB,
-  "bc3-rgba": SparkFormat.BC3_RGBA,
   "bc4-r": SparkFormat.BC4_R,
   "bc5-rg": SparkFormat.BC5_RG,
   "bc7-rgb": SparkFormat.BC7_RGB,
@@ -127,16 +125,12 @@ const SparkFormatMap = Object.freeze({
   // webgpu aliases:
   "bc1-rgba-unorm": SparkFormat.BC1_RGB,
   "bc1-rgba-unorm-srgb": SparkFormat.BC1_RGB,
-  "bc3-rgba-unorm": SparkFormat.BC3_RGBA,
-  "bc3-rgba-unorm-srgb": SparkFormat.BC3_RGBA,
   "bc4-r-unorm": SparkFormat.BC4_R,
   "bc5-rg-unorm": SparkFormat.BC5_RG,
   "bc7-rgba-unorm": SparkFormat.BC7_RGBA,
   "bc7-rgba-unorm-srgb": SparkFormat.BC7_RGBA,
   "etc2-rgb8unorm": SparkFormat.ETC2_RGB,
   "etc2-rgb8unorm-srgb": SparkFormat.ETC2_RGB,
-  "etc2-rgba8unorm": SparkFormat.ETC2_RGBA,
-  "etc2-rgba8unorm-srgb": SparkFormat.ETC2_RGBA,
   "eac-r11unorm": SparkFormat.EAC_R,
   "eac-rg11unorm": SparkFormat.EAC_RG,
   "astc-4x4-unorm": SparkFormat.ASTC_4x4_RGBA,
@@ -151,10 +145,10 @@ const SparkWebGPUFormats = [
   /* 4  */ "eac-r11unorm", // EAC_R
   /* 5  */ "eac-rg11unorm", // EAC_RG
   /* 6  */ "etc2-rgb8unorm", // ETC2_RGB
-  /* 7  */ "etc2-rgba8unorm", // ETC2_RGBA
+  /* 7  */ null,
   /* 8  */ null,
   /* 9  */ "bc1-rgba-unorm", // BC1_RGB
-  /* 10 */ "bc3-rgba-unorm", // BC3_RGBA
+  /* 10 */ null,
   /* 11 */ null,
   /* 12 */ null,
   /* 13 */ "bc4-r-unorm", // BC4_R
@@ -172,10 +166,10 @@ const SparkFormatIsRGB = [
   /* 4  */ false, // EAC_R
   /* 5  */ false, // EAC_RG
   /* 6  */ true, // ETC2_RGB
-  /* 7  */ true, // ETC2_RGBA
+  /* 7  */ null,
   /* 8  */ null,
   /* 9  */ true, // BC1_RGB
-  /* 10 */ true, // BC3_RGBA
+  /* 10 */ null,
   /* 11 */ null,
   /* 12 */ null,
   /* 13 */ false, // BC4_R
@@ -220,13 +214,12 @@ function detectWebGPUFormats(device) {
   const formatMap = {
     "texture-compression-bc": [
       SparkFormat.BC1_RGB,
-      SparkFormat.BC3_RGBA,
       SparkFormat.BC4_R,
       SparkFormat.BC5_RG,
       SparkFormat.BC7_RGB,
       SparkFormat.BC7_RGBA
     ],
-    "texture-compression-etc2": [SparkFormat.ETC2_RGB, SparkFormat.ETC2_RGBA, SparkFormat.EAC_R, SparkFormat.EAC_RG],
+    "texture-compression-etc2": [SparkFormat.ETC2_RGB, SparkFormat.EAC_R, SparkFormat.EAC_RG],
     "texture-compression-astc": [SparkFormat.ASTC_4x4_RGB, SparkFormat.ASTC_4x4_RGBA]
   }
 
@@ -372,9 +365,7 @@ class Spark {
       "eac-r",
       "eac-rg",
       "etc2-rgb",
-      "etc2-rgba",
       "bc1-rgb",
-      "bc3-rgba",
       "bc4-r",
       "bc5-rg",
       "bc7-rgb",
@@ -1012,9 +1003,7 @@ class Spark {
       "astc-4x4-rgb",
       "bc7-rgba",
       "astc-rgba",
-      "astc-4x4-rgba",
-      "bc3-rgba",
-      "etc2-rgba"
+      "astc-4x4-rgba"
     ]
     :    
     [
@@ -1029,9 +1018,7 @@ class Spark {
       "etc2-rgb",
       "bc7-rgba",
       "astc-rgba",
-      "astc-4x4-rgba",
-      "bc3-rgba",
-      "etc2-rgba"
+      "astc-4x4-rgba"
     ]
 
     // This allows selecting the best format using a substring like "rgb" or "astc"
@@ -1049,8 +1036,6 @@ class Spark {
       if (options.alpha) {
         if (this.#isFormatSupported(SparkFormat.BC7_RGBA)) return SparkFormat.BC7_RGBA
         if (this.#isFormatSupported(SparkFormat.ASTC_4x4_RGBA)) return SparkFormat.ASTC_4x4_RGBA
-        if (this.#isFormatSupported(SparkFormat.BC3_RGBA)) return SparkFormat.BC3_RGBA
-        if (this.#isFormatSupported(SparkFormat.ETC2_RGBA)) return SparkFormat.ETC2_RGBA
       } else if (options.srgb) {
         if (this.#isFormatSupported(SparkFormat.BC7_RGB)) return SparkFormat.BC7_RGB
         if (this.#isFormatSupported(SparkFormat.ASTC_4x4_RGB)) return SparkFormat.ASTC_4x4_RGB
@@ -1076,8 +1061,6 @@ class Spark {
         if (channelCount == 4) {
           if (this.#isFormatSupported(SparkFormat.BC7_RGBA)) return SparkFormat.BC7_RGBA
           if (this.#isFormatSupported(SparkFormat.ASTC_4x4_RGBA)) return SparkFormat.ASTC_4x4_RGBA
-          if (this.#isFormatSupported(SparkFormat.BC3_RGBA)) return SparkFormat.BC3_RGBA
-          if (this.#isFormatSupported(SparkFormat.ETC2_RGBA)) return SparkFormat.ETC2_RGBA
         } else if (channelCount == 3) {
           if (this.#isFormatSupported(SparkFormat.BC7_RGB)) return SparkFormat.BC7_RGB
           if (this.#isFormatSupported(SparkFormat.ASTC_4x4_RGB)) return SparkFormat.ASTC_4x4_RGB
