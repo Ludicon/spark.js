@@ -8,7 +8,7 @@ Real-time texture compression library for the Web.
 
 It enables the use of standard image formats in WebGPU applications transcoding them at load-time to native GPU formats like BC7, ASTC, and ETC2, using fast, high-quality GPU encoders.
 
-> [Try the demo viewer](https://ludicon.com/sparkjs/viewer/)
+> Try the [image viewer](https://ludicon.com/sparkjs/viewer/) or the [gltf demo](https://ludicon.com/sparkjs/gltf-demo/)
 
 ---
 
