@@ -340,7 +340,7 @@ class Spark {
    */
   static async create(device, options = {}) {
     const instance = new Spark()
-    await instance.#init(device, options.preload ?? false)
+    await instance.#init(device, options.preload ?? false, options.useTimestampQueries ?? false)
     return instance
   }
 
@@ -798,7 +798,7 @@ class Spark {
     return elapsedMilliseconds
   }
 
-  async #init(device, preload) {
+  async #init(device, preload, useTimestampQueries) {
     assert(device, "device is required")
     assert(isWebGPU(device), "device is not a WebGPU device")
 
@@ -819,7 +819,7 @@ class Spark {
       this.#device.queue.writeBuffer(this.#uniformBuffer[i], 0, new Uint32Array([i]))
     }
 
-    if (this.#device.features.has("timestamp-query")) {
+    if (useTimestampQueries && this.#device.features.has("timestamp-query")) {
       const webkitVersion = getSafariVersion()
       const firefoxVersion = getFirefoxVersion()
 
