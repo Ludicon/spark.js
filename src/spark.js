@@ -274,11 +274,14 @@ async function loadImageBitmap(url, opts = {}) {
   })
 }
 
+const IOS = isIOS()
+
 function loadImage(url) {
-  if (isSvgUrl(url)) {
+  // iOS/Safari: loadImageElement is faster than createImageBitmap.
+  if (isSvgUrl(url) || IOS) {
     return loadImageElement(url)
   } else {
-    // createImageBitmap appears to be slightly faster, but does not handle svg files.
+    // createImageBitmap appears to be slightly faster in Chrome, but does not handle svg files.
     return loadImageBitmap(url)
   }
 }
