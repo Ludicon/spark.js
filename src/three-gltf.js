@@ -42,7 +42,7 @@ class GLTFSparkPlugin {
       if (isNormal) {
         textureIsNormal[index] = true
 
-        // Normal map unpacking not supported in three.js prior to r181
+        // Normal map unpacking not supported in three.js prior to r182
         if (!("NormalRGPacking" in THREE)) {
           textureChannels[index] |= Channel.RGB
         }
@@ -177,7 +177,11 @@ class SparkLoader extends THREE.TextureLoader {
       .then(gpuTexture => {
         const texture = new THREE.ExternalTexture(gpuTexture)
         if (this.format == "rg" && "NormalRGPacking" in THREE) {
-          texture.userData.unpackNormal = THREE.NormalRGPacking
+          // This is not understood by stock three.js
+          // texture.userData.unpackNormal = THREE.NormalRGPacking
+          if (texture.format == "bc5-rg-unorm") texture.format = THREE.RED_GREEN_RGTC2_Format
+          else if (texture.format == "eac-rg11unorm") texture.format = THREE.RG11_EAC_Format
+          else texture.format = THREE.RGFormat
         }
         onLoad(texture)
       })
