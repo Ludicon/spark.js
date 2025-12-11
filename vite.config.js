@@ -5,6 +5,12 @@ import summary from "rollup-plugin-summary"
 
 export default defineConfig({
   plugins: [basicSsl()],
+  resolve: {
+    alias: {
+      "@ludicon/spark.js/three-gltf": resolve(__dirname, "src/three-gltf.js"),
+      "@ludicon/spark.js": resolve(__dirname, "src/index.js")
+    }
+  },
   server: {
     https: process.env.HTTPS == "true"
   },

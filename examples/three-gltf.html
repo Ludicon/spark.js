@@ -94,7 +94,7 @@
     console.time("Load GLTF file")
 
     const gltf = await loader.loadAsync("./assets/DamagedHelmet.glb");
-
+    
     console.timeEnd("Load GLTF file")
 
     const box = new THREE.Box3().setFromObject(gltf.scene);
