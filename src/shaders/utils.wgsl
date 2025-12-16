@@ -20,7 +20,13 @@ fn linear_to_srgb_vec4(c: vec4<f32>) -> vec4<f32> {
 }
 
 fn normalize_vec4(c: vec4<f32>) -> vec4<f32> {
-    return vec4<f32>(saturate(0.5 * normalize(2 * c.xyz - 1) + 0.5), c.w);
+    if (c.z == 0.0) {
+        // If the normal is stored with only the XY components, there's no need to normalize.
+        return c;
+    }
+    else {
+        return vec4<f32>(saturate(0.5 * normalize(2 * c.xyz - 1) + 0.5), c.w);
+    }
 }
 
 @compute @workgroup_size(8, 8)
@@ -42,7 +48,7 @@ fn mipmap(@builtin(global_invocation_id) id : vec3<u32>) {
     color += textureSampleLevel(src, smp, vec2f(uv1.x, uv0.y), 0);
     color += textureSampleLevel(src, smp, vec2f(uv0.x, uv1.y), 0);
     color += textureSampleLevel(src, smp, vec2f(uv1.x, uv1.y), 0);
-    color *= 0.25; 
+    color *= 0.25;
 
     // This would be the single sample implementation:
     // let uv = (vec2f(id.xy) + vec2f(0.5)) * size_rcp;
@@ -105,7 +111,7 @@ var<workgroup> local_invalid_normals: atomic<u32>;
 @compute @workgroup_size(8, 8)
 fn detect_channel_count(@builtin(global_invocation_id) global_id: vec3<u32>,
         @builtin(local_invocation_index) local_id: u32) {
-    
+
     if (local_id == 0u) {
         atomicStore(&local_opaque, 1u);
         atomicStore(&local_grayscale, 1u);
@@ -157,5 +163,3 @@ fn detect_channel_count(@builtin(global_invocation_id) global_id: vec3<u32>,
 
 
 // @@ Compute RMSE?
-
-
