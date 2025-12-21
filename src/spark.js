@@ -321,6 +321,7 @@ class Spark {
   #supportedFormats
   #pipelines = []
   #supportsFloat16
+  #useFragmentShader = false
   #mipmapPipeline
   #resizePipeline
   #flipYPipeline
@@ -555,7 +556,12 @@ class Spark {
     const counter = this.#encodeCounter++
     console.time("create input texture #" + counter)
 
-    let inputUsage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.STORAGE_BINDING
+    let inputUsage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+    if (this.#useFragmentShader) {
+      inputUsage |= GPUTextureUsage.RENDER_ATTACHMENT
+    } else {
+      inputUsage |= GPUTextureUsage.STORAGE_BINDING
+    }
 
     const needsProcessing = options.flipY || width != image.width || height != image.height
 
@@ -890,29 +896,104 @@ class Spark {
       }
     }
 
-    this.#mipmapPipeline = await this.#device.createComputePipelineAsync({
-      layout: "auto",
-      compute: {
-        module: shaderModule,
-        entryPoint: "mipmap"
-      }
-    })
+    // To work around bugs in Firefox that are not fixed as of r148, we have to generate mipmaps
+    // using fragment shaders and render passes. This is because Firefox does not correctly support
+    // textures with srgb and non-srgb view formats, which makes it impossible to use an srgb
+    // texture for storage. For more details see:
+    // https://github.com/Ludicon/spark.js/issues/1
+    // https://bugzilla.mozilla.org/show_bug.cgi?id=1977241
+    const firefoxVersion = getFirefoxVersion()
+    if (firefoxVersion) {
+      this.#useFragmentShader = true
+    }
 
-    this.#resizePipeline = await this.#device.createComputePipelineAsync({
-      layout: "auto",
-      compute: {
-        module: shaderModule,
-        entryPoint: "resize"
-      }
-    })
+    if (this.#useFragmentShader) {
+      this.#mipmapPipeline = {}
+      this.#resizePipeline = {}
+      this.#flipYPipeline = {}
 
-    this.#flipYPipeline = await this.#device.createComputePipelineAsync({
-      layout: "auto",
-      compute: {
-        module: shaderModule,
-        entryPoint: "flipy"
+      const formats = ["rgba8unorm-srgb", "rgba8unorm"]
+
+      for (const format of formats) {
+        this.#mipmapPipeline[format] = this.#device.createRenderPipeline({
+          label: `mipmap-pipeline-${format}`,
+          layout: "auto",
+          vertex: {
+            module: shaderModule,
+            entryPoint: "fullscreen_vs"
+          },
+          fragment: {
+            module: shaderModule,
+            entryPoint: "mipmap_fs",
+            targets: [{ format }]
+          },
+          primitive: {
+            topology: "triangle-strip",
+            stripIndexFormat: "uint32"
+          }
+        })
+
+        this.#resizePipeline[format] = this.#device.createRenderPipeline({
+          label: `resize-pipeline-${format}`,
+          layout: "auto",
+          vertex: {
+            module: shaderModule,
+            entryPoint: "fullscreen_vs"
+          },
+          fragment: {
+            module: shaderModule,
+            entryPoint: "resize_fs",
+            targets: [{ format }]
+          },
+          primitive: {
+            topology: "triangle-strip",
+            stripIndexFormat: "uint32"
+          }
+        })
+
+        this.#flipYPipeline[format] = this.#device.createRenderPipeline({
+          label: `flip-y-pipeline-${format}`,
+          layout: "auto",
+          vertex: {
+            module: shaderModule,
+            entryPoint: "fullscreen_vs"
+          },
+          fragment: {
+            module: shaderModule,
+            entryPoint: "flipy_fs",
+            targets: [{ format }]
+          },
+          primitive: {
+            topology: "triangle-strip",
+            stripIndexFormat: "uint32"
+          }
+        })
       }
-    })
+    } else {
+      this.#mipmapPipeline = this.#device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: shaderModule,
+          entryPoint: "mipmap"
+        }
+      })
+
+      this.#resizePipeline = this.#device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: shaderModule,
+          entryPoint: "resize"
+        }
+      })
+
+      this.#flipYPipeline = this.#device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: shaderModule,
+          entryPoint: "flipy"
+        }
+      })
+    }
 
     this.#detectChannelCountPipeline = await this.#device.createComputePipelineAsync({
       layout: "auto",
@@ -1181,7 +1262,12 @@ class Spark {
   }
 
   // Apply scaling and flipY transform.
-  async #processInputTexture(encoder, inputTexture, outputTexture, width, height, colorMode, flipY) {
+  #processInputTexture(encoder, inputTexture, outputTexture, width, height, colorMode, flipY) {
+    if (this.#useFragmentShader) {
+      this.#processInputTextureFragmentShader(encoder, inputTexture, outputTexture, width, height, colorMode, flipY)
+      return
+    }
+
     const pass = encoder.beginComputePass()
 
     const pipeline = flipY ? this.#flipYPipeline : this.#resizePipeline
@@ -1227,19 +1313,83 @@ class Spark {
     pass.end()
   }
 
-  async #generateMipmaps(encoder, texture, mipmapCount, width, height, colorMode) {
-    const pass = encoder.beginComputePass()
-    pass.setPipeline(this.#mipmapPipeline)
+  // Apply scaling and flipY transform.
+  #processInputTextureFragmentShader(encoder, inputTexture, outputTexture, width, height, colorMode, flipY) {
+    const format = colorMode == 1 ? "rgba8unorm-srgb" : "rgba8unorm"
 
-    let w = width
-    let h = height
-    for (let i = 0; i < mipmapCount - 1; i++) {
-      w = Math.max(1, Math.floor(w / 2))
-      h = Math.max(1, Math.floor(h / 2))
-      this.#generateMipLevel(pass, texture, i, i + 1, w, h, colorMode)
-    }
+    const dstView = outputTexture.createView({
+      baseMipLevel: 0,
+      mipLevelCount: 1,
+      dimension: "2d",
+      format: format,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT
+    })
+
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: dstView,
+          loadOp: "clear",
+          storeOp: "store",
+          clearValue: [0, 0, 0, 0]
+        }
+      ]
+    })
+
+    const pipeline = flipY ? this.#flipYPipeline[format] : this.#resizePipeline[format]
+
+    pass.setPipeline(pipeline)
+
+    const bindGroup = this.#device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        {
+          binding: 0,
+          resource: inputTexture.createView({
+            baseMipLevel: 0,
+            mipLevelCount: 1,
+            format: colorMode == 1 ? "rgba8unorm-srgb" : "rgba8unorm",
+            usage: GPUTextureUsage.TEXTURE_BINDING
+          })
+        },
+        {
+          binding: 2,
+          resource: this.#defaultSampler
+        },
+        {
+          binding: 3,
+          resource: { buffer: this.#uniformBuffer[colorMode] }
+        }
+      ]
+    })
+
+    pass.setBindGroup(0, bindGroup)
+    pass.draw(4, 1, 0, 0)
 
     pass.end()
+  }
+
+  async #generateMipmaps(encoder, texture, mipmapCount, width, height, colorMode) {
+    let w = width
+    let h = height
+    if (this.#useFragmentShader) {
+      for (let i = 0; i < mipmapCount - 1; i++) {
+        w = Math.max(1, Math.floor(w / 2))
+        h = Math.max(1, Math.floor(h / 2))
+        this.#generateMipLevelFragmentShader(encoder, texture, i, i + 1, w, h, colorMode)
+      }
+    } else {
+      const pass = encoder.beginComputePass()
+      pass.setPipeline(this.#mipmapPipeline)
+
+      for (let i = 0; i < mipmapCount - 1; i++) {
+        w = Math.max(1, Math.floor(w / 2))
+        h = Math.max(1, Math.floor(h / 2))
+        this.#generateMipLevel(pass, texture, i, i + 1, w, h, colorMode)
+      }
+
+      pass.end()
+    }
   }
 
   #generateMipLevel(pass, texture, srcLevel, dstLevel, width, height, colorMode) {
@@ -1278,6 +1428,57 @@ class Spark {
 
     pass.setBindGroup(0, bindGroup)
     pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8))
+  }
+
+  #generateMipLevelFragmentShader(encoder, texture, srcLevel, dstLevel, width, height, colorMode) {
+    const format = colorMode == 1 ? "rgba8unorm-srgb" : "rgba8unorm"
+    const dstView = texture.createView({
+      baseMipLevel: dstLevel,
+      mipLevelCount: 1,
+      dimension: "2d",
+      format: format,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT
+    })
+
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: dstView,
+          loadOp: "clear",
+          storeOp: "store",
+          clearValue: [0, 0, 0, 0]
+        }
+      ]
+    })
+
+    const bindGroup = this.#device.createBindGroup({
+      layout: this.#mipmapPipeline[format].getBindGroupLayout(0),
+      entries: [
+        {
+          binding: 0,
+          resource: texture.createView({
+            baseMipLevel: srcLevel,
+            mipLevelCount: 1,
+            format: format,
+            usage: GPUTextureUsage.TEXTURE_BINDING
+          })
+        },
+        {
+          binding: 2,
+          resource: this.#defaultSampler
+        },
+        {
+          binding: 3,
+          resource: { buffer: this.#uniformBuffer[colorMode] }
+        }
+      ]
+    })
+
+    pass.setPipeline(this.#mipmapPipeline[format])
+    pass.setBindGroup(0, bindGroup)
+    pass.draw(4, 1, 0, 0)
+
+    pass.end()
   }
 }
 

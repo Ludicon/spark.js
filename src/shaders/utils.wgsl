@@ -101,6 +101,71 @@ fn flipy(@builtin(global_invocation_id) id : vec3<u32>) {
     textureStore(dst, id.xy, color);
 }
 
+// Fullscreen vertex shader
+struct VSOutput {
+	@builtin(position) pos: vec4<f32>,
+	@location(0) tex : vec2<f32>
+};
+
+@vertex
+fn fullscreen_vs(@builtin(vertex_index) vertexIndex : u32) -> VSOutput {
+
+	var pos = array< vec2<f32>, 4 >(
+		vec2<f32>(-1.0,  1.0),
+		vec2<f32>( 1.0,  1.0),
+		vec2<f32>(-1.0, -1.0),
+		vec2<f32>( 1.0, -1.0)
+	);
+
+	var tex = array< vec2<f32>, 4 >(
+		vec2<f32>(0.0, 0.0),
+		vec2<f32>(1.0, 0.0),
+		vec2<f32>(0.0, 1.0),
+		vec2<f32>(1.0, 1.0)
+	);
+
+	var vs_output : VSOutput;
+	vs_output.tex = tex[ vertexIndex ];
+	vs_output.pos = vec4<f32>( pos[ vertexIndex ], 0.0, 1.0 );
+	return vs_output;
+}
+
+@fragment
+fn mipmap_fs(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
+
+    var color = textureSample(src, smp, uv);
+
+    if (params.colorMode == 2) {
+        color = normalize_vec4(color);
+    }
+
+	return color;
+}
+
+@fragment
+fn resize_fs(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
+
+    var color = textureSample(src, smp, uv);
+
+    if (params.colorMode == 2) {
+        color = normalize_vec4(color);
+    }
+
+    return color;
+}
+
+@fragment
+fn flipy_fs(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
+
+    var color = textureSample(src, smp, vec2(uv.x, 1 - uv.y));
+
+    if (params.colorMode == 2) {
+        color = normalize_vec4(color);
+    }
+
+    return color;
+}
+
 
 @group(0) @binding(1) var<storage, read_write> global_counters: array<atomic<u32>, 3>;
 
