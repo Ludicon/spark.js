@@ -274,11 +274,12 @@ async function loadImageBitmap(url, opts = {}) {
   })
 }
 
-const IOS = isIOS()
+const webkitVersion = getSafariVersion()
 
 function loadImage(url) {
-  // iOS/Safari: loadImageElement is faster than createImageBitmap.
-  if (isSvgUrl(url) || IOS) {
+  // webkit: loadImageElement is faster than createImageBitmap.
+  // webkit: certain images non-srgb do not load correctly.
+  if (isSvgUrl(url) || webkitVersion) {
     return loadImageElement(url)
   } else {
     // createImageBitmap appears to be slightly faster in Chrome, but does not handle svg files.
