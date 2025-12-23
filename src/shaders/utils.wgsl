@@ -2,6 +2,10 @@ struct Params {
     colorMode: u32,
 };
 
+const COLOR_LINEAR : u32 = 0u;
+const COLOR_SRGB   : u32 = 1u;
+const COLOR_NORMAL : u32 = 2u;
+
 @group(0) @binding(0) var src : texture_2d<f32>;
 @group(0) @binding(1) var dst : texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(2) var smp: sampler;
@@ -38,25 +42,53 @@ fn mipmap(@builtin(global_invocation_id) id : vec3<u32>) {
 
     let size_rcp = vec2f(1.0) / vec2f(dstSize);
 
-    // We are not doing this yet, but in some cases we want to take 4 samples in order to apply alpha weighting,
-    // or to support non multiple of two textures.
+    // We take 4 samples explicitly in order to support alpha weighting and for slightly more correct
+    // results when using non multiple of two textures.
     let uv0 = (vec2f(id.xy) + vec2f(0.25)) * size_rcp;
     let uv1 = uv0 + 0.5 * size_rcp;
 
     var color = vec4f(0.0);
-    color += textureSampleLevel(src, smp, vec2f(uv0.x, uv0.y), 0);
-    color += textureSampleLevel(src, smp, vec2f(uv1.x, uv0.y), 0);
-    color += textureSampleLevel(src, smp, vec2f(uv0.x, uv1.y), 0);
-    color += textureSampleLevel(src, smp, vec2f(uv1.x, uv1.y), 0);
-    color *= 0.25;
+
+    if (params.colorMode == COLOR_SRGB) {
+        let c00 = textureSampleLevel(src, smp, vec2f(uv0.x, uv0.y), 0);
+        let c10 = textureSampleLevel(src, smp, vec2f(uv1.x, uv0.y), 0);
+        let c01 = textureSampleLevel(src, smp, vec2f(uv0.x, uv1.y), 0);
+        let c11 = textureSampleLevel(src, smp, vec2f(uv1.x, uv1.y), 0);
+
+        let a00 = c00.a;
+        let a10 = c10.a;
+        let a01 = c01.a;
+        let a11 = c11.a;
+        let a_sum = a00 + a10 + a01 + a11;
+
+        color.a = 0.25 * a_sum;
+        if (a_sum > 1.0 / 256.0) {
+            color.r = (c00.r * a00 + c10.r * a10 + c01.r * a01 + c11.r * a11) / a_sum;
+            color.g = (c00.g * a00 + c10.g * a10 + c01.g * a01 + c11.g * a11) / a_sum;
+            color.b = (c00.b * a00 + c10.b * a10 + c01.b * a01 + c11.b * a11) / a_sum;
+        } else {
+            color.r = 0.25 * (c00.r + c10.r + c01.r + c11.r);
+            color.g = 0.25 * (c00.g + c10.g + c01.g + c11.g);
+            color.b = 0.25 * (c00.b + c10.b + c01.b + c11.b);
+        }
+    }
+    else {
+        // For linear colors, we assume no alpha.
+        // @@ We could normalize/reconstruct normals before averaging.
+        color += textureSampleLevel(src, smp, vec2f(uv0.x, uv0.y), 0);
+        color += textureSampleLevel(src, smp, vec2f(uv1.x, uv0.y), 0);
+        color += textureSampleLevel(src, smp, vec2f(uv0.x, uv1.y), 0);
+        color += textureSampleLevel(src, smp, vec2f(uv1.x, uv1.y), 0);
+        color *= 0.25;
+    }
 
     // This would be the single sample implementation:
     // let uv = (vec2f(id.xy) + vec2f(0.5)) * size_rcp;
     // var color = textureSampleLevel(src, smp, vec2f(uv.x, uv.y), 0);
 
-    if (params.colorMode == 1) {
+    if (params.colorMode == COLOR_SRGB) {
         color = linear_to_srgb_vec4(color);
-    } else if (params.colorMode == 2) {
+    } else if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
     }
 
@@ -73,9 +105,9 @@ fn resize(@builtin(global_invocation_id) id : vec3<u32>) {
     let uv = (vec2f(id.xy) + vec2f(0.5)) / vec2f(dstSize);
     var color = textureSampleLevel(src, smp, uv, 0);
 
-    if (params.colorMode == 1) {
+    if (params.colorMode == COLOR_SRGB) {
         color = linear_to_srgb_vec4(color);
-    } else if (params.colorMode == 2) {
+    } else if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
     }
 
@@ -92,9 +124,9 @@ fn flipy(@builtin(global_invocation_id) id : vec3<u32>) {
     let uv = (vec2f(f32(id.x), f32(dstSize.y - 1u - id.y)) + vec2f(0.5)) / vec2f(dstSize);
     var color = textureSampleLevel(src, smp, uv, 0);
 
-    if (params.colorMode == 1) {
+    if (params.colorMode == COLOR_SRGB) {
         color = linear_to_srgb_vec4(color);
-    } else if (params.colorMode == 2) {
+    } else if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
     }
 
