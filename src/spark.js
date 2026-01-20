@@ -199,7 +199,14 @@ function isIOS() {
 }
 
 function getSafariVersion() {
-  const match = navigator.userAgent.match(/Safari\/(\d+(\.\d+)?)/)
+  const ua = navigator.userAgent
+  // Safari detection: must contain "Safari/" but NOT "Chrome" or "Chromium"
+  // Chrome's UA: "...Chrome/xxx Safari/xxx"
+  // Safari's UA: "...Safari/xxx" (without Chrome)
+  if (ua.includes("Chrome") || ua.includes("Chromium")) {
+    return null
+  }
+  const match = ua.match(/Safari\/(\d+(\.\d+)?)/)
   return match && parseFloat(match[1])
 }
 
@@ -278,11 +285,13 @@ const webkitVersion = getSafariVersion()
 
 function loadImage(url) {
   // webkit: loadImageElement is faster than createImageBitmap.
-  // webkit: certain images non-srgb do not load correctly.
+  // webkit: certain images do not load correctly with loadImageBitmap.
+  // chrome: linear images load incorrectly with loadImageElement.
+  // chrome: loadImageBitmap is slightly faster.
+  // chrome: loadImageBitmap does not support svg files.
   if (isSvgUrl(url) || webkitVersion) {
     return loadImageElement(url)
   } else {
-    // createImageBitmap appears to be slightly faster in Chrome, but does not handle svg files.
     return loadImageBitmap(url)
   }
 }
