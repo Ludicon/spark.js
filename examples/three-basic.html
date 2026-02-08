@@ -1,120 +1,126 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
+  <head>
+    <meta charset="utf-8" />
+    <title>three.js + spark.js example</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        background: #111;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
 
-<head>
-  <meta charset="utf-8" />
-  <title>three.js + spark.js example</title>
-  <style>
-    html, body { height: 100%; margin: 0; }
-    body { background: #111; }
-    canvas { display: block; width: 100%; height: 100%; }
-  </style>
-</head>
+  <body>
+    <script type="module">
+      import * as THREE from "three/webgpu"
+      import { Spark } from "@ludicon/spark.js"
 
-<body>
-  <script type="module">
-    import * as THREE from "three/webgpu";
-    import { Spark } from "@ludicon/spark.js";
-
-    const errorHTML = `
+      const errorHTML = `
       <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
         <h1>WebGPU Not Supported</h1>
         <p>This demo requires a browser with WebGPU support.</p>
         <p>Please try using <strong>Chrome</strong> or <strong>Edge</strong> with WebGPU enabled, or a recent version of <strong>Safari</strong> on macOS.</p>
         <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API" target="_blank">MDN: WebGPU API</a></p>
-      </div>`;        
+      </div>`
 
-    if (!navigator.gpu) {
-      document.body.innerHTML = errorHTML;
-      throw new Error('WebGPU not supported');
-    }
-
-    let adapter = null;
-    try {
-      adapter = await navigator.gpu.requestAdapter();
-    } catch (err) {
-      console.error("Error while requesting WebGPU adapter:", err);
-    }
-    if (!adapter) {
-      document.body.innerHTML = errorMessage;
-      throw new Error('No appropriate GPUAdapter found');
-    }
-
-    const threeRevision = parseInt(THREE.REVISION, 10);
-    if (threeRevision < 180) {
-      throw new Error(`Three.js r180 or newer is required (found r${THREE.REVISION})`);
-    }
-    
-    const requiredFeatures = Spark.getRequiredFeatures(adapter);
-    const device = await adapter.requestDevice({ requiredFeatures });
-
-    const canvas = document.createElement('canvas');
-    document.body.appendChild(canvas);
-
-    const context = canvas.getContext('webgpu');
-
-    // Create WebGPU renderer with the given device:
-    const renderer = new THREE.WebGPURenderer({ device, context })
-    await renderer.init();
-
-
-    // Create spark device
-    const spark = await Spark.create(device);
-
-    // Load and encode texture using spark:
-    const gpuTexture = await spark.encodeTexture('./assets/kodim23.avif', { srgb: true, flipY: true });
-
-    // Wrap the GPUTexture for three.js
-    const externalTex = new THREE.ExternalTexture(gpuTexture);
-
-    // Basic unlit material using the external texture
-    const material = new THREE.MeshBasicMaterial({ map: externalTex });
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
-    camera.position.z = 1;
-
-    const plane = new THREE.PlaneGeometry(2, 2);
-    const mesh = new THREE.Mesh(plane, material);
-    scene.add(mesh);
-
-
-    function resize() {
-      const displayWidth = window.innerWidth;
-      const displayHeight = window.innerHeight;
-
-      const canvas = document.querySelector('canvas');
-      if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-        canvas.width = displayWidth;
-        canvas.height = displayHeight;
+      if (!navigator.gpu) {
+        document.body.innerHTML = errorHTML
+        throw new Error("WebGPU not supported")
       }
 
-      const w = canvas.width;
-      const h = canvas.height;
-      renderer.setSize(w, h, false);        
-
-      // Keep the quad square relative to the texture’s aspect
-      const texW = gpuTexture?.width || 1;
-      const texH = gpuTexture?.height || 1;
-      const canvasAspect = w / h;
-      const texAspect = texW / texH;
-
-      // Fit texture to canvas while preserving its aspect
-      let sx = 1, sy = 1;
-      if (texAspect > canvasAspect) {
-        sy = canvasAspect / texAspect;
-      } else {
-        sx = texAspect / canvasAspect;
+      let adapter = null
+      try {
+        adapter = await navigator.gpu.requestAdapter()
+      } catch (err) {
+        console.error("Error while requesting WebGPU adapter:", err)
       }
-      mesh.scale.set(sx, sy, 1);
+      if (!adapter) {
+        document.body.innerHTML = errorMessage
+        throw new Error("No appropriate GPUAdapter found")
+      }
 
-      renderer.render(scene, camera);
-    }
+      const threeRevision = parseInt(THREE.REVISION, 10)
+      if (threeRevision < 180) {
+        throw new Error(`Three.js r180 or newer is required (found r${THREE.REVISION})`)
+      }
 
-    window.addEventListener('resize', resize);
-    resize();
+      const requiredFeatures = Spark.getRequiredFeatures(adapter)
+      const device = await adapter.requestDevice({ requiredFeatures })
 
-  </script>
-</body>
+      const canvas = document.createElement("canvas")
+      document.body.appendChild(canvas)
 
+      const context = canvas.getContext("webgpu")
+
+      // Create WebGPU renderer with the given device:
+      const renderer = new THREE.WebGPURenderer({ device, context })
+      await renderer.init()
+
+      // Create spark device
+      const spark = await Spark.create(device, { verbose: true })
+
+      // Load and encode texture using spark:
+      const gpuTexture = await spark.encodeTexture("./assets/kodim23.avif", { srgb: true, flipY: true })
+
+      // Wrap the GPUTexture for three.js
+      const externalTex = new THREE.ExternalTexture(gpuTexture)
+
+      // Basic unlit material using the external texture
+      const material = new THREE.MeshBasicMaterial({ map: externalTex })
+
+      const scene = new THREE.Scene()
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10)
+      camera.position.z = 1
+
+      const plane = new THREE.PlaneGeometry(2, 2)
+      const mesh = new THREE.Mesh(plane, material)
+      scene.add(mesh)
+
+      function resize() {
+        const displayWidth = window.innerWidth
+        const displayHeight = window.innerHeight
+
+        const canvas = document.querySelector("canvas")
+        if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+          canvas.width = displayWidth
+          canvas.height = displayHeight
+        }
+
+        const w = canvas.width
+        const h = canvas.height
+        renderer.setSize(w, h, false)
+
+        // Keep the quad square relative to the texture’s aspect
+        const texW = gpuTexture?.width || 1
+        const texH = gpuTexture?.height || 1
+        const canvasAspect = w / h
+        const texAspect = texW / texH
+
+        // Fit texture to canvas while preserving its aspect
+        let sx = 1,
+          sy = 1
+        if (texAspect > canvasAspect) {
+          sy = canvasAspect / texAspect
+        } else {
+          sx = texAspect / canvasAspect
+        }
+        mesh.scale.set(sx, sy, 1)
+
+        renderer.render(scene, camera)
+      }
+
+      window.addEventListener("resize", resize)
+      resize()
+    </script>
+  </body>
 </html>
