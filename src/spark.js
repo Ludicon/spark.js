@@ -344,18 +344,43 @@ class Spark {
   #queryReadbackBuffer
 
   #encodeCounter = 0
+  #verbose = false
 
   /**
    * Initialize the encoder by detecting available compression formats.
    * @param {GPUDevice} device - WebGPU device.
    * @param {Object} options - Encoder options.
    * @param {boolean} options.preload - Whether to preload all encoder pipelines (false by default).
+   * @param {boolean} options.verbose - Whether to enable verbose logging (false by default).
    * @returns {Promise<void>} Resolves when initialization is complete.
    */
   static async create(device, options = {}) {
     const instance = new Spark()
-    await instance.#init(device, options.preload ?? false, options.useTimestampQueries ?? false)
+    await instance.#init(
+      device,
+      options.preload ?? false,
+      options.useTimestampQueries ?? false,
+      options.verbose ?? false
+    )
     return instance
+  }
+
+  #log(...args) {
+    if (this.#verbose) {
+      console.log(...args)
+    }
+  }
+
+  #time(label) {
+    if (this.#verbose) {
+      console.time(label)
+    }
+  }
+
+  #timeEnd(label) {
+    if (this.#verbose) {
+      console.timeEnd(label)
+    }
   }
 
   /**
@@ -534,7 +559,7 @@ class Spark {
       source instanceof Image || source instanceof ImageBitmap || source instanceof GPUTexture
         ? source
         : await loadImage(source)
-    console.log("Loaded image", image)
+    this.#log("Loaded image", image)
 
     const format = await this.#getBestMatchingFormat(options, image)
 
@@ -564,7 +589,7 @@ class Spark {
 
     // Allocate input texture. @@ This texture could be persistent.
     const counter = this.#encodeCounter++
-    console.time("create input texture #" + counter)
+    this.#time("create input texture #" + counter)
 
     let inputUsage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
     if (this.#useFragmentShader) {
@@ -646,7 +671,7 @@ class Spark {
 
     commandEncoder.popDebugGroup?.()
 
-    console.timeEnd("create input texture #" + counter)
+    this.#timeEnd("create input texture #" + counter)
 
     // Allocate output texture.
     const outputTexture = this.#device.createTexture({
@@ -664,7 +689,7 @@ class Spark {
 
     // Dispatch compute shader to encode the input texture in the output buffer.
     const label = `dispatch compute shader '${SparkFormatName[format]}' #${counter}`
-    console.time(label)
+    this.#time(label)
 
     commandEncoder.pushDebugGroup?.("spark encode texture")
 
@@ -746,7 +771,7 @@ class Spark {
 
     this.#device.queue.submit([commandEncoder.finish()])
 
-    console.timeEnd(label)
+    this.#timeEnd(label)
 
     // Destroy temporary buffers/textures after the work is done.
     // this.#device.queue.onSubmittedWorkDone().then(() => {
@@ -817,11 +842,12 @@ class Spark {
     return elapsedMilliseconds
   }
 
-  async #init(device, preload, useTimestampQueries) {
+  async #init(device, preload, useTimestampQueries, verbose) {
     assert(device, "device is required")
     assert(isWebGPU(device), "device is not a WebGPU device")
 
     this.#device = device
+    this.#verbose = verbose
 
     this.#supportedFormats = detectWebGPUFormats(this.#device)
     this.#defaultSampler = this.#device.createSampler({
@@ -1020,7 +1046,7 @@ class Spark {
     }
 
     const pipelinePromise = (async () => {
-      console.time("loadPipeline " + SparkFormatName[format])
+      this.#time("loadPipeline " + SparkFormatName[format])
 
       const shaderFile = SparkShaderFiles[format]
       assert(shaderFile, `No shader available for format ${SparkFormatName[format]}`)
@@ -1063,7 +1089,7 @@ class Spark {
         }
       })
 
-      console.timeEnd("loadPipeline " + SparkFormatName[format])
+      this.#timeEnd("loadPipeline " + SparkFormatName[format])
 
       return pipeline
     })()
