@@ -21,6 +21,7 @@ class GLTFSparkPlugin {
       ["rgb"]: new SparkLoader(parser.fileLoader.manager, spark, options, "rgb"),
       ["rgb-srgb"]: new SparkLoader(parser.fileLoader.manager, spark, options, "rgb", THREE.SRGBColorSpace),
       ["rg"]: new SparkLoader(parser.fileLoader.manager, spark, options, "rg"),
+      ["normal"]: new SparkLoader(parser.fileLoader.manager, spark, { ...options, normal: true }, "rg"),
       ["r"]: new SparkLoader(parser.fileLoader.manager, spark, options, "r"),
       [""]: new THREE.TextureLoader()
     }
@@ -135,19 +136,23 @@ class GLTFSparkPlugin {
     const imageIndex = tex.source ?? tex.extensions.EXT_texture_webp?.source ?? tex.extensions.EXT_texture_avif?.source
     const colorSpace = this.textureColorSpaces[textureIndex]
     const channels = this.textureChannels[textureIndex]
+    const isNormal = this.textureIsNormal[textureIndex]
     const isUncompressed = this.textureIsUncompressed[textureIndex]
 
-    let format = "rgba" // Default to 'rgba'
-    if ((channels & Channel.R) == channels) {
-      format = "r"
-    } else if ((channels & Channel.RG) == channels) {
-      format = "rg"
-    } else if ((channels & Channel.RGB) == channels) {
-      format = "rgb" + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "")
-    } else {
+    let format
+    if (channels & Channel.A) {
       format = "rgba" + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "")
+    } else if (channels & Channel.B) {
+      format = "rgb" + (colorSpace === THREE.SRGBColorSpace ? "-srgb" : "")
+    } else if (channels & Channel.G) {
+      format = "rg"
+    } else {
+      format = "r"
     }
-    if (isUncompressed) {
+
+    if (isNormal) {
+      format = "normal"
+    } else if (isUncompressed) {
       format = ""
     }
 
@@ -170,7 +175,7 @@ class SparkLoader extends THREE.TextureLoader {
     const format = this.format
     const srgb = this.colorSpace === THREE.SRGBColorSpace
     const mips = true
-    const normal = this.format == "rg"
+    const normal = this.options.normal // this.format == "rg"
 
     this.spark
       .encodeTexture(url, { format, srgb, mips, normal, preferLowQuality: this.options.preferLowQuality })
