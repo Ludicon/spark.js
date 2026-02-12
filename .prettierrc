@@ -3,5 +3,15 @@
   "plugins": [],
   "printWidth": 120,
   "semi": false,
-  "trailingComma": "none"
+  "trailingComma": "none",
+  "overrides": [
+    {
+      "files": "*.html",
+      "options": {
+        "tabWidth": 2,
+        "singleAttributePerLine": false,
+        "htmlWhitespaceSensitivity": "ignore",
+      }
+    }
+  ]
 }

@@ -1,132 +1,131 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>three.js + spark.js GLTF loader example</title>
-  <style>
-    html, body { height: 100%; margin: 0; }
-    body { background: #111; }
-    canvas { display: block; width: 100%; height: 100%; }
-  </style>
-</head>
+  <!-- prettier-ignore -->
+  <head>
+    <meta charset="utf-8" />
+    <title>three.js + spark.js GLTF loader example</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body { background: #111; }
+      canvas { display: block; width: 100%; height: 100%; }
+    </style>
+  </head>
 
-<body>
-  <script type="module">
-    import * as THREE from "three/webgpu";
-    import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-    import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-    import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+  <body>
+    <script type="module">
+      import * as THREE from "three/webgpu"
+      import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
+      import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
+      import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
 
-    import { Spark } from "@ludicon/spark.js";
-    import { registerSparkLoader } from "@ludicon/spark.js/three-gltf";
+      import { Spark } from "@ludicon/spark.js"
+      import { registerSparkLoader } from "@ludicon/spark.js/three-gltf"
 
-    const errorHTML = `
+      const errorHTML = `
       <div style="color: #FFF; padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
         <h1>WebGPU Not Supported</h1>
         <p>This demo requires a browser with WebGPU support.</p>
         <p>Please try using <strong>Chrome</strong> or <strong>Edge</strong> with WebGPU enabled, or a recent version of <strong>Safari</strong> on macOS.</p>
         <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API" target="_blank">MDN: WebGPU API</a></p>
-      </div>`;
+      </div>`
 
-    if (!navigator.gpu) {
-      document.body.innerHTML = errorHTML;
-      throw new Error('WebGPU not supported');
-    }
-
-    let adapter = null;
-    try {
-      adapter = await navigator.gpu.requestAdapter();
-    } catch (err) {
-      console.error("Error while requesting WebGPU adapter:", err);
-    }
-    if (!adapter) {
-      document.body.innerHTML = errorMessage;
-      throw new Error('No appropriate GPUAdapter found');
-    }
-
-    const threeRevision = parseInt(THREE.REVISION, 10);
-    if (threeRevision < 180) {
-      throw new Error(`Three.js r180 or newer is required (found r${THREE.REVISION})`);
-    }
-
-    const requiredFeatures = Spark.getRequiredFeatures(adapter);
-    const device = await adapter.requestDevice({ requiredFeatures });
-
-    const canvas = document.createElement('canvas');
-    document.body.appendChild(canvas);
-
-    const context = canvas.getContext('webgpu');
-
-    // Create WebGPU renderer with the given device:
-    const renderer = new THREE.WebGPURenderer({ device, context, antialias: true });
-    await renderer.init();
-
-    // Create spark device
-    const spark = await Spark.create(device, { preload: ["rgb", "rg", "r"] });
-
-    // Scene
-    const scene = new THREE.Scene();
-
-    // Camera
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(2, 2, 3);
-
-    // Controls
-    const controls = new OrbitControls(camera, canvas);
-
-    // Light
-    const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(3, 5, 2);
-    scene.add(light);
-    scene.add(new THREE.AmbientLight(0xffffff));
-
-    // Environment map
-    let pmremGenerator = new THREE.PMREMGenerator(renderer);
-    pmremGenerator.compileEquirectangularShader();
-    const neutralEnvironment = pmremGenerator.fromScene(new RoomEnvironment()).texture;
-    scene.environment = neutralEnvironment;
-
-
-    // Load GLTF
-    const loader = new GLTFLoader()
-    registerSparkLoader(loader, spark)
-
-    console.time("Load GLTF file")
-
-    const gltf = await loader.loadAsync("./assets/DamagedHelmet.glb");
-    
-    console.timeEnd("Load GLTF file")
-
-    const box = new THREE.Box3().setFromObject(gltf.scene);
-    const scale = box.getSize(new THREE.Vector3()).length();
-    gltf.scene.scale.multiplyScalar(4 / scale);
-
-    scene.add(gltf.scene)
-
-    // Handle resize
-    function resize() {
-      const canvas = document.querySelector('canvas');
-      if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+      if (!navigator.gpu) {
+        document.body.innerHTML = errorHTML
+        throw new Error("WebGPU not supported")
       }
 
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    };
+      let adapter = null
+      try {
+        adapter = await navigator.gpu.requestAdapter()
+      } catch (err) {
+        console.error("Error while requesting WebGPU adapter:", err)
+      }
+      if (!adapter) {
+        document.body.innerHTML = errorMessage
+        throw new Error("No appropriate GPUAdapter found")
+      }
 
-    window.addEventListener('resize', resize);
-    resize();
+      const threeRevision = parseInt(THREE.REVISION, 10)
+      if (threeRevision < 180) {
+        throw new Error(`Three.js r180 or newer is required (found r${THREE.REVISION})`)
+      }
 
-    // Animation loop
-    function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    }
-    animate();
+      const requiredFeatures = Spark.getRequiredFeatures(adapter)
+      const device = await adapter.requestDevice({ requiredFeatures })
 
-  </script>
-</body>
+      const canvas = document.createElement("canvas")
+      document.body.appendChild(canvas)
+
+      const context = canvas.getContext("webgpu")
+
+      // Create WebGPU renderer with the given device:
+      const renderer = new THREE.WebGPURenderer({ device, context, antialias: true })
+      await renderer.init()
+
+      // Create spark device
+      const spark = await Spark.create(device, { preload: ["rgb", "rg", "r"] })
+
+      // Scene
+      const scene = new THREE.Scene()
+
+      // Camera
+      const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100)
+      camera.position.set(2, 2, 3)
+
+      // Controls
+      const controls = new OrbitControls(camera, canvas)
+
+      // Light
+      const light = new THREE.DirectionalLight(0xffffff, 1)
+      light.position.set(3, 5, 2)
+      scene.add(light)
+      scene.add(new THREE.AmbientLight(0xffffff))
+
+      // Environment map
+      let pmremGenerator = new THREE.PMREMGenerator(renderer)
+      pmremGenerator.compileEquirectangularShader()
+      const neutralEnvironment = pmremGenerator.fromScene(new RoomEnvironment()).texture
+      scene.environment = neutralEnvironment
+
+      // Load GLTF
+      const loader = new GLTFLoader()
+      registerSparkLoader(loader, spark)
+
+      console.time("Load GLTF file")
+
+      const gltf = await loader.loadAsync("./assets/DamagedHelmet.glb")
+
+      console.timeEnd("Load GLTF file")
+
+      const box = new THREE.Box3().setFromObject(gltf.scene)
+      const scale = box.getSize(new THREE.Vector3()).length()
+      gltf.scene.scale.multiplyScalar(4 / scale)
+
+      scene.add(gltf.scene)
+
+      // Handle resize
+      function resize() {
+        const canvas = document.querySelector("canvas")
+        if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+          canvas.width = window.innerWidth
+          canvas.height = window.innerHeight
+        }
+
+        camera.aspect = window.innerWidth / window.innerHeight
+        camera.updateProjectionMatrix()
+        renderer.setSize(window.innerWidth, window.innerHeight)
+      }
+
+      window.addEventListener("resize", resize)
+      resize()
+
+      // Animation loop
+      function animate() {
+        requestAnimationFrame(animate)
+        controls.update()
+        renderer.render(scene, camera)
+      }
+      animate()
+    </script>
+  </body>
 </html>

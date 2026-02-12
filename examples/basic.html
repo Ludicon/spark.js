@@ -1,14 +1,11 @@
 <!doctype html>
 <html>
+  <!-- prettier-ignore -->
   <head>
     <title>spark.js example</title>
     <style>
-      body {
-        margin: 0;
-      }
-      canvas {
-        display: block;
-      }
+      body { margin: 0; }
+      canvas { display: block; }
     </style>
   </head>
 
@@ -63,71 +60,60 @@
 
       // Vertex shader
       const vertexShader = `
-            struct Uniforms {
-                canvasWidth: f32,
-                canvasHeight: f32,
-                textureWidth: f32,
-                textureHeight: f32,
-            }
-            @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+        struct Uniforms {
+          canvasWidth: f32,
+          canvasHeight: f32,
+          textureWidth: f32,
+          textureHeight: f32,
+        }
+        @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
-            struct VertexOutput {
-                @builtin(position) position: vec4f,
-                @location(0) texCoord: vec2f,
-            }
+        struct VertexOutput {
+          @builtin(position) position: vec4f,
+          @location(0) texCoord: vec2f,
+        }
 
-            @vertex
-            fn main(@location(0) position: vec2f,
-                    @location(1) texCoord: vec2f) -> VertexOutput {
-                var output: VertexOutput;
+        @vertex
+        fn main(@location(0) position: vec2f,
+                @location(1) texCoord: vec2f) -> VertexOutput {
+          var output: VertexOutput;
 
-                // Scale the position to maintain 1:1 aspect ratio
-                let aspect = (uniforms.textureHeight * uniforms.canvasWidth) / (uniforms.canvasHeight * uniforms.textureWidth);
+          // Scale the position to maintain 1:1 aspect ratio
+          let aspect = (uniforms.textureHeight * uniforms.canvasWidth) / (uniforms.canvasHeight * uniforms.textureWidth);
 
-                let scale = vec2f(
-                    min(1.0, 1.0 / aspect),
-                    max(-1.0, -aspect));
-                let scaledPos = position * scale;
+          let scale = vec2f(
+            min(1.0, 1.0 / aspect),
+            max(-1.0, -aspect));
+          let scaledPos = position * scale;
 
-                output.position = vec4f(scaledPos, 0.0, 1.0);
-                output.texCoord = texCoord;
-                return output;
-            }
+          output.position = vec4f(scaledPos, 0.0, 1.0);
+          output.texCoord = texCoord;
+          return output;
+        }
         `
 
       // Fragment shader
       const fragmentShader = `
-            @group(0) @binding(1) var t_diffuse: texture_2d<f32>;
-            @group(0) @binding(2) var s_diffuse: sampler;
+        @group(0) @binding(1) var t_diffuse: texture_2d<f32>;
+        @group(0) @binding(2) var s_diffuse: sampler;
 
-            @fragment
-            fn main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
-                var color = textureSampleLevel(t_diffuse, s_diffuse, texCoord, 0.0).xyz;
+        @fragment
+        fn main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
+          var color = textureSampleLevel(t_diffuse, s_diffuse, texCoord, 0.0).xyz;
 
-                return vec4f(color, 1.0);
-            }
+          return vec4f(color, 1.0);
+        }
         `
 
       // Create vertex buffer
       function createVertexBuffer(device) {
+        // prettier-ignore
         const vertices = new Float32Array([
           // position (x, y), texCoord (u, v)
-          -1.0,
-          -1.0,
-          0.0,
-          0.0, // bottom left
-          1.0,
-          -1.0,
-          1.0,
-          0.0, // bottom right
-          -1.0,
-          1.0,
-          0.0,
-          1.0, // top left
-          1.0,
-          1.0,
-          1.0,
-          1.0 // top right
+          -1.0, -1.0, 0.0, 0.0, // bottom left
+           1.0, -1.0, 1.0, 0.0, // bottom right
+          -1.0,  1.0, 0.0, 1.0, // top left
+           1.0,  1.0, 1.0, 1.0  // top right
         ])
 
         const vertexBuffer = device.createBuffer({
