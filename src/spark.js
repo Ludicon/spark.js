@@ -539,6 +539,12 @@ class Spark {
    *        Whether to generate mipmaps. Mipmaps are generated with a basic box filter
    *        in linear space.
    *
+   * @param {number[]} [options.mipsAlphaScale]
+   *        Optional array of alpha scale values to apply to each generated mipmap level.
+   *        The array should contain one value per mipmap level (starting with mip level 1,
+   *        since level 0 is the base image). Each value multiplies the alpha channel of
+   *        the corresponding mipmap level.
+   *
    * @param {boolean} [options.srgb=false]
    *        Whether to encode the image in an sRGB format. Also affects mipmap generation.
    *        The `srgb` mode can also be inferred from the `format`.
@@ -667,7 +673,7 @@ class Spark {
     }
 
     if (mipmaps) {
-      this.#generateMipmaps(commandEncoder, inputTexture, mipmapCount, width, height, colorMode)
+      this.#generateMipmaps(commandEncoder, inputTexture, mipmapCount, width, height, colorMode, options.mipsAlphaScale)
     }
 
     commandEncoder.popDebugGroup?.()
@@ -1303,7 +1309,15 @@ class Spark {
     return 3
   }
 
-  #updateUniformBuffer(colorMode, alphaScale = 1.0) {
+  #updateUniformBuffer(colorMode, mipsAlphaScale, level) {
+    // Get alpha scale for this mip level
+    const alphaScale =
+      mipsAlphaScale && mipsAlphaScale.length > 0
+        ? level < mipsAlphaScale.length
+          ? mipsAlphaScale[level]
+          : mipsAlphaScale[mipsAlphaScale.length - 1]
+        : 1.0
+
     const uniformData = new ArrayBuffer(8)
     const uniformDataView = new DataView(uniformData)
     uniformDataView.setUint32(0, colorMode, true)
@@ -1423,13 +1437,15 @@ class Spark {
     pass.end()
   }
 
-  async #generateMipmaps(encoder, texture, mipmapCount, width, height, colorMode) {
+  async #generateMipmaps(encoder, texture, mipmapCount, width, height, colorMode, mipsAlphaScale) {
+    if (mipsAlphaScale == undefined) this.#updateUniformBuffer(colorMode)
+
     let w = width
     let h = height
     if (this.#useFragmentShader) {
-      this.#updateUniformBuffer(colorMode)
-
       for (let i = 0; i < mipmapCount - 1; i++) {
+        if (mipsAlphaScale != undefined) this.#updateUniformBuffer(colorMode, mipsAlphaScale, i)
+
         w = Math.max(1, Math.floor(w / 2))
         h = Math.max(1, Math.floor(h / 2))
         this.#generateMipLevelFragmentShader(encoder, texture, i, i + 1, w, h, colorMode)
@@ -1440,11 +1456,11 @@ class Spark {
       const pipeline = this.#magicMipmapPipeline
       const layout = pipeline.getBindGroupLayout(0)
 
-      this.#updateUniformBuffer(colorMode, 2.0)
-
       pass.setPipeline(pipeline)
 
       for (let i = 0; i < mipmapCount - 1; i++) {
+        if (mipsAlphaScale != undefined) this.#updateUniformBuffer(colorMode, mipsAlphaScale, i)
+
         w = Math.max(1, Math.floor(w / 2))
         h = Math.max(1, Math.floor(h / 2))
         this.#generateMipLevel(pass, layout, texture, i, i + 1, w, h, colorMode)

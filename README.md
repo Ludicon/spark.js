@@ -110,6 +110,9 @@ Load an image and encode it to a compressed GPU texture.
   - **`mips`** or **`generateMipmaps`** (`boolean`)
     Whether to generate mipmaps. Mipmaps are generated with a basic box filter in linear space. Default: `false`.
 
+  - **`mipsAlphaScale`** (`number[]`)
+    Optional array of alpha scale values to apply to each generated mipmap level. The array should contain one value per mipmap level (starting with mip level 1, since level 0 is the base image). Each value multiplies the alpha channel of the corresponding mipmap level. Values greater than 1.0 increase opacity, while values less than 1.0 increase transparency. This is useful for techniques like alpha-tested mipmaps where you want to compensate for alpha loss at lower mip levels. If the array is shorter than the number of mipmap levels, the last value is used for remaining levels. Only applies when `mips` is `true`. Default: `undefined` (no scaling applied).
+
   - **`srgb`** (`boolean`)
     Whether to encode the image using an as sRGB format. This also affects mipmap generation. The `srgb` mode can also be inferred from the `format`. Default: `false`. 
 
