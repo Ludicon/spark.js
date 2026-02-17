@@ -333,12 +333,13 @@ class Spark {
   #supportsFloat16
   #useFragmentShader = false
   #mipmapPipeline
+  #magicMipmapPipeline
   #resizePipeline
   #flipYPipeline
   #detectChannelCountPipeline
 
   #defaultSampler
-  #uniformBuffer = new Array(3)
+  #uniformBuffer
   #querySet
   #queryBuffer
   #queryReadbackBuffer
@@ -855,14 +856,11 @@ class Spark {
       minFilter: "linear"
     })
 
-    // Create three dummy buffers for each of the color modes: linear, srgb, normal.
-    for (let i = 0; i < 3; i++) {
-      this.#uniformBuffer[i] = this.#device.createBuffer({
-        size: 4,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-      })
-      this.#device.queue.writeBuffer(this.#uniformBuffer[i], 0, new Uint32Array([i]))
-    }
+    // Create uniform buffer for the mipmap shader.
+    this.#uniformBuffer = this.#device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    })
 
     if (useTimestampQueries && this.#device.features.has("timestamp-query")) {
       const webkitVersion = getSafariVersion()
@@ -1011,6 +1009,14 @@ class Spark {
         compute: {
           module: shaderModule,
           entryPoint: "mipmap"
+        }
+      })
+
+      this.#magicMipmapPipeline = this.#device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: shaderModule,
+          entryPoint: "magic_mipmap"
         }
       })
 
@@ -1297,12 +1303,23 @@ class Spark {
     return 3
   }
 
+  #updateUniformBuffer(colorMode, alphaScale = 1.0) {
+    const uniformData = new ArrayBuffer(8)
+    const uniformDataView = new DataView(uniformData)
+    uniformDataView.setUint32(0, colorMode, true)
+    uniformDataView.setFloat32(4, alphaScale, true)
+
+    this.#device.queue.writeBuffer(this.#uniformBuffer, 0, uniformData)
+  }
+
   // Apply scaling and flipY transform.
   #processInputTexture(encoder, inputTexture, outputTexture, width, height, colorMode, flipY) {
     if (this.#useFragmentShader) {
       this.#processInputTextureFragmentShader(encoder, inputTexture, outputTexture, width, height, colorMode, flipY)
       return
     }
+
+    this.#updateUniformBuffer(colorMode)
 
     const pass = encoder.beginComputePass()
 
@@ -1338,7 +1355,7 @@ class Spark {
         },
         {
           binding: 3,
-          resource: { buffer: this.#uniformBuffer[colorMode] }
+          resource: { buffer: this.#uniformBuffer }
         }
       ]
     })
@@ -1372,8 +1389,9 @@ class Spark {
       ]
     })
 
-    const pipeline = flipY ? this.#flipYPipeline[format] : this.#resizePipeline[format]
+    this.#updateUniformBuffer(colorMode)
 
+    const pipeline = flipY ? this.#flipYPipeline[format] : this.#resizePipeline[format]
     pass.setPipeline(pipeline)
 
     const bindGroup = this.#device.createBindGroup({
@@ -1394,7 +1412,7 @@ class Spark {
         },
         {
           binding: 3,
-          resource: { buffer: this.#uniformBuffer[colorMode] }
+          resource: { buffer: this.#uniformBuffer }
         }
       ]
     })
@@ -1409,6 +1427,8 @@ class Spark {
     let w = width
     let h = height
     if (this.#useFragmentShader) {
+      this.#updateUniformBuffer(colorMode)
+
       for (let i = 0; i < mipmapCount - 1; i++) {
         w = Math.max(1, Math.floor(w / 2))
         h = Math.max(1, Math.floor(h / 2))
@@ -1416,21 +1436,27 @@ class Spark {
       }
     } else {
       const pass = encoder.beginComputePass()
-      pass.setPipeline(this.#mipmapPipeline)
+      // const pipeline = this.#mipmapPipeline
+      const pipeline = this.#magicMipmapPipeline
+      const layout = pipeline.getBindGroupLayout(0)
+
+      this.#updateUniformBuffer(colorMode, 2.0)
+
+      pass.setPipeline(pipeline)
 
       for (let i = 0; i < mipmapCount - 1; i++) {
         w = Math.max(1, Math.floor(w / 2))
         h = Math.max(1, Math.floor(h / 2))
-        this.#generateMipLevel(pass, texture, i, i + 1, w, h, colorMode)
+        this.#generateMipLevel(pass, layout, texture, i, i + 1, w, h, colorMode)
       }
 
       pass.end()
     }
   }
 
-  #generateMipLevel(pass, texture, srcLevel, dstLevel, width, height, colorMode) {
+  #generateMipLevel(pass, layout, texture, srcLevel, dstLevel, width, height, colorMode) {
     const bindGroup = this.#device.createBindGroup({
-      layout: this.#mipmapPipeline.getBindGroupLayout(0),
+      layout: layout,
       entries: [
         {
           binding: 0,
@@ -1457,7 +1483,7 @@ class Spark {
         },
         {
           binding: 3,
-          resource: { buffer: this.#uniformBuffer[colorMode] }
+          resource: { buffer: this.#uniformBuffer }
         }
       ]
     })
@@ -1505,7 +1531,7 @@ class Spark {
         },
         {
           binding: 3,
-          resource: { buffer: this.#uniformBuffer[colorMode] }
+          resource: { buffer: this.#uniformBuffer }
         }
       ]
     })

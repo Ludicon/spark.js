@@ -1,5 +1,6 @@
 struct Params {
     colorMode: u32,
+    alphaScale: f32,
 };
 
 const COLOR_LINEAR : u32 = 0u;
@@ -11,6 +12,16 @@ const COLOR_NORMAL : u32 = 2u;
 @group(0) @binding(2) var smp: sampler;
 @group(0) @binding(3) var<uniform> params: Params;
 
+fn srgb_to_linear_vec3(c: vec3<f32>) -> vec3<f32> {
+    return select(pow((c + vec3f(0.055)) * vec3f(1.0 / 1.055), vec3f(2.4)),
+        c * vec3f(1.0 / 12.92),
+        c <= vec3f(0.04045)
+    );
+}
+fn srgb_to_linear_vec4(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(srgb_to_linear_vec3(c.xyz), c.w);
+}
+
 fn linear_to_srgb_vec3(c: vec3<f32>) -> vec3<f32> {
     return select(
         1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - 0.055,
@@ -18,7 +29,6 @@ fn linear_to_srgb_vec3(c: vec3<f32>) -> vec3<f32> {
         c <= vec3<f32>(0.0031308)
     );
 }
-
 fn linear_to_srgb_vec4(c: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(linear_to_srgb_vec3(c.xyz), c.w);
 }
@@ -88,6 +98,152 @@ fn mipmap(@builtin(global_invocation_id) id : vec3<u32>) {
 
     if (params.colorMode == COLOR_SRGB) {
         color = linear_to_srgb_vec4(color);
+        color.a = color.a * params.alphaScale;
+    } else if (params.colorMode == COLOR_NORMAL) {
+        color = normalize_vec4(color);
+    }
+
+    textureStore(dst, id.xy, color);
+}
+
+// Simple version without shared memory (for comparison)
+@compute @workgroup_size(8, 8)
+fn magic_mipmap_simple(@builtin(global_invocation_id) id: vec3<u32>) {
+
+    let dstSize = textureDimensions(dst).xy;
+    if (id.x >= dstSize.x || id.y >= dstSize.y) {
+        return;
+    }
+
+    let sizeRcp = vec2f(0.5) / vec2f(dstSize);
+    let base = 2.0 * vec2<f32>(id.xy) - vec2<f32>(1.5, 1.5); // - 2 + 0.5
+
+    // Integer weights (normalization applied at the end).
+    let w: array<f32, 6> = array<f32, 6>(1.0, -5.0, 20.0, 20.0, -5.0, 1.0);
+
+    var accum: vec4<f32> = vec4<f32>(0.0);
+
+    // 6x6 taps around (base.x, base.y):
+    for (var j: i32 = 0; j < 6; j = j + 1) {
+        let v = (base.y + f32(j)) * sizeRcp.y;
+
+        var row: vec4<f32> = vec4<f32>(0.0);
+        for (var i: i32 = 0; i < 6; i = i + 1) {
+            let wx = w[i];
+            let u = (base.x + f32(i)) * sizeRcp.x;
+
+            row = row + wx * textureSampleLevel(src, smp, vec2f(u, v), 0);
+        }
+
+        let wy = w[j];
+        accum = accum + wy * row;
+    }
+
+    // Normalize: (/32) horizontally and (/32) vertically => /1024.
+    var color = accum * (1.0 / 1024.0);
+
+    if (params.colorMode == COLOR_SRGB) {
+        color = linear_to_srgb_vec4(color);
+        color.a = color.a * params.alphaScale;
+    } else if (params.colorMode == COLOR_NORMAL) {
+        color = normalize_vec4(color);
+    }
+
+    textureStore(dst, id.xy, color);
+}
+
+const TILE_SIZE = 20u;
+const WORKGROUP_SIZE = 8u;
+const N = TILE_SIZE * TILE_SIZE;
+
+// Shared memory for optimized mipmap computation
+// For 8x8 workgroup, we need 8*2+5 = 21 pixels in each dimension (with 6-tap kernel)
+var<workgroup> sharedData: array<f32, 4 * N>;
+
+@compute @workgroup_size(8, 8)
+fn magic_mipmap(
+    @builtin(global_invocation_id) id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+    @builtin(workgroup_id) group_id: vec3<u32>
+) {
+    let dstSize = textureDimensions(dst).xy;
+
+    // Load data into shared memory cooperatively
+    let sizeRcp = vec2f(0.5) / vec2f(dstSize);
+    let groupBase = vec2f(group_id.xy * WORKGROUP_SIZE);
+    let srcBase = 2.0 * groupBase - vec2f(1.5);
+
+    const samplesPerThread = (TILE_SIZE * TILE_SIZE + WORKGROUP_SIZE * WORKGROUP_SIZE - 1u) / (WORKGROUP_SIZE * WORKGROUP_SIZE);
+    let threadIdx = local_id.y * WORKGROUP_SIZE + local_id.x;
+
+    for (var s = 0u; s < samplesPerThread; s = s + 1u) {
+        let flatIdx = threadIdx + s * (WORKGROUP_SIZE * WORKGROUP_SIZE);
+        if (flatIdx < TILE_SIZE * TILE_SIZE) {
+            let sharedY = flatIdx / TILE_SIZE;
+            let sharedX = flatIdx % TILE_SIZE;
+
+            let srcPos = srcBase + vec2f(f32(sharedX), f32(sharedY));
+            let uv = srcPos * sizeRcp;
+
+            let color = textureSampleLevel(src, smp, uv, 0);
+            if (params.colorMode == COLOR_SRGB) {
+                sharedData[0 * N + flatIdx] = color.r * color.a;
+                sharedData[1 * N + flatIdx] = color.g * color.a;
+                sharedData[2 * N + flatIdx] = color.b * color.a;
+                sharedData[3 * N + flatIdx] = color.a;
+            }
+            else {
+                sharedData[0 * N + flatIdx] = color.r;
+                sharedData[1 * N + flatIdx] = color.g;
+                sharedData[2 * N + flatIdx] = color.b;
+                sharedData[3 * N + flatIdx] = color.a;
+            }
+        }
+    }
+
+    // Synchronize to ensure all data is loaded
+    workgroupBarrier();
+
+    // Check bounds
+    if (id.x >= dstSize.x || id.y >= dstSize.y) {
+        return;
+    }
+
+    // Integer weights (normalization applied at the end).
+    let w: array<f32, 6> = array<f32, 6>(1.0, -5.0, 20.0, 20.0, -5.0, 1.0);
+
+    var accum: vec4<f32> = vec4<f32>(0.0);
+
+    // Perform 6x6 convolution using shared memory
+    // Local position within shared memory
+    let sharedBaseX = local_id.x * 2u;
+    let sharedBaseY = local_id.y * 2u;
+
+    for (var j: u32 = 0u; j < 6u; j = j + 1u) {
+        var row: vec4<f32> = vec4<f32>(0.0);
+        for (var i: u32 = 0u; i < 6u; i = i + 1u) {
+            let sharedIdx = (sharedBaseY + j) * TILE_SIZE + (sharedBaseX + i);
+            let c = vec4f(sharedData[sharedIdx], sharedData[N + sharedIdx], sharedData[2 * N + sharedIdx], sharedData[3 * N + sharedIdx]);
+            row = row + w[i] * c;
+        }
+        accum = accum + w[j] * row;
+    }
+
+    if (params.colorMode == COLOR_SRGB) {
+        if (accum.a >= 1.0 / 256.0) {
+            let scale = 1024.0 / accum.a;
+            accum.r = accum.r * scale;
+            accum.g = accum.g * scale;
+            accum.b = accum.b * scale;
+        }
+    }
+
+    // Normalize: (/32) horizontally and (/32) vertically => /1024.
+    var color = accum * (1.0 / 1024.0);
+
+    if (params.colorMode == COLOR_SRGB) {
+        color = linear_to_srgb_vec4(color);
+        color.a = color.a * params.alphaScale;
     } else if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
     }
@@ -165,7 +321,9 @@ fn fullscreen_vs(@builtin(vertex_index) vertexIndex : u32) -> VSOutput {
 @fragment
 fn mipmap_fs(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 
-    var color = textureSample(src, smp, uv);
+    // Instead of using level 0, we could pass the level as an argument, and reuse the same bindgroup
+    // for all mipmaps.
+    var color = textureSampleLevel(src, smp, uv, 0);
 
     if (params.colorMode == 2) {
         color = normalize_vec4(color);
