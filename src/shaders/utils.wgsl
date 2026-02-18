@@ -107,6 +107,7 @@ fn mipmap(@builtin(global_invocation_id) id : vec3<u32>) {
 }
 
 // Simple version without shared memory (for comparison)
+// Note: this version does not have alpha weighting.
 @compute @workgroup_size(8, 8)
 fn magic_mipmap_simple(@builtin(global_invocation_id) id: vec3<u32>) {
 
@@ -116,51 +117,51 @@ fn magic_mipmap_simple(@builtin(global_invocation_id) id: vec3<u32>) {
     }
 
     let sizeRcp = vec2f(0.5) / vec2f(dstSize);
-    let base = 2.0 * vec2<f32>(id.xy) - vec2<f32>(1.5, 1.5); // - 2 + 0.5
+    let base = 2.0 * vec2<f32>(id.xy) - vec2<f32>(0.5, 0.5); // - 1 + 0.5
 
-    // Integer weights (normalization applied at the end).
-    let w: array<f32, 6> = array<f32, 6>(1.0, -5.0, 20.0, 20.0, -5.0, 1.0);
+    let w = array<f32, 4>(-0.125, 0.625, 0.625, -0.125);
 
-    var accum: vec4<f32> = vec4<f32>(0.0);
+    var accum = vec4<f32>(0.0);
 
-    // 6x6 taps around (base.x, base.y):
-    for (var j: i32 = 0; j < 6; j = j + 1) {
+    // 4x4 taps around (base.x, base.y):
+    for (var j = 0; j < 4; j = j + 1) {
         let v = (base.y + f32(j)) * sizeRcp.y;
 
-        var row: vec4<f32> = vec4<f32>(0.0);
-        for (var i: i32 = 0; i < 6; i = i + 1) {
-            let wx = w[i];
+        var row = vec4<f32>(0.0);
+        for (var i = 0; i < 4; i = i + 1) {
             let u = (base.x + f32(i)) * sizeRcp.x;
 
-            row = row + wx * textureSampleLevel(src, smp, vec2f(u, v), 0);
+            row = row + w[i] * textureSampleLevel(src, smp, vec2f(u, v), 0);
         }
 
-        let wy = w[j];
-        accum = accum + wy * row;
+        accum = accum + w[j] * row;
     }
 
-    // Normalize: (/32) horizontally and (/32) vertically => /1024.
-    var color = accum * (1.0 / 1024.0);
+    var color = accum;
 
     if (params.colorMode == COLOR_SRGB) {
         color = linear_to_srgb_vec4(color);
         color.a = color.a * params.alphaScale;
-    } else if (params.colorMode == COLOR_NORMAL) {
+    }
+    else if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
     }
 
     textureStore(dst, id.xy, color);
 }
 
-const TILE_SIZE = 20u;
+const KERNEL_SIZE = 4u;
 const WORKGROUP_SIZE = 8u;
+const TILE_SIZE = (WORKGROUP_SIZE * 2 + 2); // 18
 const N = TILE_SIZE * TILE_SIZE;
+const W = WORKGROUP_SIZE * WORKGROUP_SIZE;
 
 // Shared memory for optimized mipmap computation
-// For 8x8 workgroup, we need 8*2+5 = 21 pixels in each dimension (with 6-tap kernel)
+// For 8x8 workgroup, we need 8*2+2 = 18 pixels in each dimension (with 4-tap kernel)
 var<workgroup> sharedData: array<f32, 4 * N>;
+//var<workgroup> sharedTmp: array<f32, 4 * W>;
 
-@compute @workgroup_size(8, 8)
+@compute @workgroup_size(WORKGROUP_SIZE, WORKGROUP_SIZE)
 fn magic_mipmap(
     @builtin(global_invocation_id) id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
@@ -171,14 +172,14 @@ fn magic_mipmap(
     // Load data into shared memory cooperatively
     let sizeRcp = vec2f(0.5) / vec2f(dstSize);
     let groupBase = vec2f(group_id.xy * WORKGROUP_SIZE);
-    let srcBase = 2.0 * groupBase - vec2f(1.5);
+    let srcBase = 2.0 * groupBase - vec2f(0.5);
 
-    const samplesPerThread = (TILE_SIZE * TILE_SIZE + WORKGROUP_SIZE * WORKGROUP_SIZE - 1u) / (WORKGROUP_SIZE * WORKGROUP_SIZE);
+    const samplesPerThread = (N + W - 1u) / W; // 6
     let threadIdx = local_id.y * WORKGROUP_SIZE + local_id.x;
 
     for (var s = 0u; s < samplesPerThread; s = s + 1u) {
-        let flatIdx = threadIdx + s * (WORKGROUP_SIZE * WORKGROUP_SIZE);
-        if (flatIdx < TILE_SIZE * TILE_SIZE) {
+        let flatIdx = threadIdx + s * W;
+        if (flatIdx < N) {
             let sharedY = flatIdx / TILE_SIZE;
             let sharedX = flatIdx % TILE_SIZE;
 
@@ -209,42 +210,37 @@ fn magic_mipmap(
         return;
     }
 
-    // Integer weights (normalization applied at the end).
-    let w: array<f32, 6> = array<f32, 6>(1.0, -5.0, 20.0, 20.0, -5.0, 1.0);
+    // Perform 4x4 convolution using shared memory
+    let w = array<f32, 4>(-0.125, 0.625, 0.625, -0.125);
+    let sharedOffset = local_id.y * 2u * TILE_SIZE + local_id.x * 2u;
 
-    var accum: vec4<f32> = vec4<f32>(0.0);
+    var accum = vec4<f32>(0.0);
 
-    // Perform 6x6 convolution using shared memory
-    // Local position within shared memory
-    let sharedBaseX = local_id.x * 2u;
-    let sharedBaseY = local_id.y * 2u;
-
-    for (var j: u32 = 0u; j < 6u; j = j + 1u) {
-        var row: vec4<f32> = vec4<f32>(0.0);
-        for (var i: u32 = 0u; i < 6u; i = i + 1u) {
-            let sharedIdx = (sharedBaseY + j) * TILE_SIZE + (sharedBaseX + i);
+    // TODO: We could convolve each channel separately and branch based on the channel mask.
+    for (var j = 0u; j < 4u; j = j + 1u) {
+        var row = vec4<f32>(0.0);
+        for (var i = 0u; i < 4u; i = i + 1u) {
+            let sharedIdx = sharedOffset + j * TILE_SIZE + i;
             let c = vec4f(sharedData[sharedIdx], sharedData[N + sharedIdx], sharedData[2 * N + sharedIdx], sharedData[3 * N + sharedIdx]);
             row = row + w[i] * c;
         }
         accum = accum + w[j] * row;
     }
 
+    var color = accum;
+
     if (params.colorMode == COLOR_SRGB) {
-        if (accum.a >= 1.0 / 256.0) {
-            let scale = 1024.0 / accum.a;
-            accum.r = accum.r * scale;
-            accum.g = accum.g * scale;
-            accum.b = accum.b * scale;
+        // Unpremultiply color
+        if (color.a >= 1.0 / 256.0) {
+            let scale = 1.0 / color.a;
+            color.r = color.r * scale;
+            color.g = color.g * scale;
+            color.b = color.b * scale;
         }
-    }
-
-    // Normalize: (/32) horizontally and (/32) vertically => /1024.
-    var color = accum * (1.0 / 1024.0);
-
-    if (params.colorMode == COLOR_SRGB) {
         color = linear_to_srgb_vec4(color);
         color.a = color.a * params.alphaScale;
-    } else if (params.colorMode == COLOR_NORMAL) {
+    }
+    else if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
     }
 
