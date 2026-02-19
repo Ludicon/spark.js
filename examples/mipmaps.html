@@ -111,25 +111,25 @@
           // Display the first 7 mipmaps.
           var color = vec3f(0.0);
           if (texCoord.x < 1.0/2.0) {
-              color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(2 * texCoord.x, texCoord.y), 0.0).xyz;
+              color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(2 * texCoord.x, texCoord.y), 1.0).xyz;
           }
           else if (texCoord.x < 3.0/4.0 && texCoord.y < 1.0/2.0) {
-            color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(4 * texCoord.x - 2, 2 * texCoord.y), 1.0).xyz;
+            color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(4 * texCoord.x - 2, 2 * texCoord.y), 2.0).xyz;
           }
           else if (texCoord.x < 7.0/8.0 && texCoord.y < 1.0/4.0) {
-            color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(8 * texCoord.x - 6, 4 * texCoord.y), 2.0).xyz;
+            color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(8 * texCoord.x - 6, 4 * texCoord.y), 3.0).xyz;
           }
           else if (texCoord.x < 15.0/16.0 && texCoord.y < 1.0/8.0) {
-            color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(16 * texCoord.x - 14, 8 * texCoord.y), 3.0).xyz;
+            color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(16 * texCoord.x - 14, 8 * texCoord.y), 4.0).xyz;
           }
           else if (texCoord.x < 31.0/32.0 && texCoord.y < 1.0/16.0) {
-            color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(32 * texCoord.x - 30, 16 * texCoord.y), 4.0).xyz;
+            color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(32 * texCoord.x - 30, 16 * texCoord.y), 5.0).xyz;
           }
           else if (texCoord.x < 63.0/64.0 && texCoord.y < 1.0/32.0) {
-            color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(64 * texCoord.x - 62, 32 * texCoord.y), 5.0).xyz;
+            color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(64 * texCoord.x - 62, 32 * texCoord.y), 6.0).xyz;
           }
           else if (texCoord.x < 127.0/128.0 && texCoord.y < 1.0/64.0) {
-            color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(128 * texCoord.x - 126, 64 * texCoord.y), 6.0).xyz;
+            color = textureSampleLevel(t_diffuse, s_diffuse, vec2f(128 * texCoord.x - 126, 64 * texCoord.y), 7.0).xyz;
           }
 
           color = linear_to_srgb_vec3(color);
