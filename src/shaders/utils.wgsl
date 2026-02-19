@@ -159,7 +159,6 @@ const W = WORKGROUP_SIZE * WORKGROUP_SIZE;
 // Shared memory for optimized mipmap computation
 // For 8x8 workgroup, we need 8*2+2 = 18 pixels in each dimension (with 4-tap kernel)
 var<workgroup> sharedData: array<f32, 4 * N>;
-//var<workgroup> sharedTmp: array<f32, 4 * W>;
 
 @compute @workgroup_size(WORKGROUP_SIZE, WORKGROUP_SIZE)
 fn magic_mipmap(
