@@ -108,7 +108,10 @@ Load an image and encode it to a compressed GPU texture.
     Hint for the automatic format selector. When the input format is `"rgb"` it chooses 8 bit per block formats like `"bc1"` or `"etc2"` instead of `"bc7"` or `"astc"`.
 
   - **`mips`** or **`generateMipmaps`** (`boolean`)
-    Whether to generate mipmaps. Mipmaps are generated with a basic box filter in linear space. Default: `false`.
+    Whether to generate mipmaps. Default: `false`.
+
+  - **`mipmapFilter`** (`string`)
+    The filter to use for mipmap generation. Can be `"box"` for a simple box filter, or `"magic"` for a higher-quality 6-tap separable filter. Default: `"magic"`.
 
   - **`mipsAlphaScale`** (`number[]`)
     Optional array of alpha scale values to apply to each generated mipmap level. The array should contain one value per mipmap level (starting with mip level 1, since level 0 is the base image). Each value multiplies the alpha channel of the corresponding mipmap level. Values greater than 1.0 increase opacity, while values less than 1.0 increase transparency. This is useful for techniques like alpha-tested mipmaps where you want to compensate for alpha loss at lower mip levels. If the array is shorter than the number of mipmap levels, the last value is used for remaining levels. Only applies when `mips` is `true`. Default: `undefined` (no scaling applied).
