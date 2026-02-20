@@ -4,12 +4,52 @@
   <head>
     <title>spark.js example</title>
     <style>
-      body { margin: 0; }
+      body { margin: 0; font-family: sans-serif; }
       canvas { display: block; }
+      #controls {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 15px 20px;
+        border-radius: 8px;
+        z-index: 100;
+      }
+      #controls label {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 14px;
+      }
+      #controls select {
+        padding: 5px 10px;
+        font-size: 14px;
+        border-radius: 4px;
+        border: 1px solid #555;
+        background: #333;
+        color: white;
+        cursor: pointer;
+      }
+      #controls select:hover {
+        background: #444;
+      }
+      #status {
+        margin-top: 10px;
+        font-size: 12px;
+        color: #aaa;
+      }
     </style>
   </head>
 
   <body>
+    <div id="controls">
+      <label for="mipmapFilter">Mipmap Filter:</label>
+      <select id="mipmapFilter">
+        <option value="magic" selected>Magic</option>
+        <option value="box">Box</option>
+      </select>
+      <div id="status"></div>
+    </div>
     <script type="module">
       import { Spark } from "@ludicon/spark.js"
 
@@ -177,29 +217,72 @@
           usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         })
 
-        const textureUrl = "./assets/paint.png"
+        // const textureUrl = "./assets/paint.png"
+        // const textureUrl = "./assets/valve.png"
+        const textureUrl = "./assets/quadTexture_wAlpha_1k.avif"
+
+        const statusElement = document.getElementById("status")
+        const mipmapFilterSelect = document.getElementById("mipmapFilter")
 
         let texture
-        try {
-          device.pushErrorScope("validation")
-          device.pushErrorScope("internal")
+        let bindGroup
 
-          texture = await spark.encodeTexture(textureUrl, { format: "rgb", srgb: true, mips: true })
-        } finally {
-          const validationError = await device.popErrorScope()
-          const internalError = await device.popErrorScope()
+        async function encodeTexture(mipmapFilter) {
+          statusElement.textContent = "Encoding..."
 
-          if (validationError) {
-            console.error("WebGPU Validation error:", validationError.message)
+          try {
+            device.pushErrorScope("validation")
+            device.pushErrorScope("internal")
+
+            texture = await spark.encodeTexture(textureUrl, {
+              format: "rgb",
+              srgb: true,
+              mips: true,
+              mipmapFilter: mipmapFilter
+            })
+          } finally {
+            const validationError = await device.popErrorScope()
+            const internalError = await device.popErrorScope()
+
+            if (validationError) {
+              console.error("WebGPU Validation error:", validationError.message)
+            }
+            if (internalError) {
+              console.error("WebGPU Internal error:", internalError.message)
+            }
           }
-          if (internalError) {
-            console.error("WebGPU Internal error:", internalError.message)
+
+          const elapsed = await spark.getTimeElapsed()
+          if (elapsed) {
+            statusElement.textContent = `Encoded in ${elapsed.toFixed(2)} ms`
+            console.log(`GPU time: ${elapsed.toFixed(2)} ms`)
+          } else {
+            statusElement.textContent = "Encoded"
           }
+
+          // Update bind group with new texture
+          bindGroup = device.createBindGroup({
+            layout: bindGroupLayout,
+            entries: [
+              {
+                binding: 0,
+                resource: { buffer: uniformBuffer }
+              },
+              {
+                binding: 1,
+                resource: texture.createView()
+              },
+              {
+                binding: 2,
+                resource: sampler
+              }
+            ]
+          })
+
+          // Update uniform buffer with texture dimensions
+          const uniformData = new Float32Array([window.innerWidth, window.innerHeight, texture.width, texture.height])
+          device.queue.writeBuffer(uniformBuffer, 0, uniformData)
         }
-
-        spark.getTimeElapsed().then(elapsed => {
-          if (elapsed) console.log(`GPU time: ${elapsed.toFixed(2)} ms`)
-        })
 
         // Create sampler
         const sampler = device.createSampler({
@@ -231,25 +314,6 @@
         // Create pipeline layout
         const pipelineLayout = device.createPipelineLayout({
           bindGroupLayouts: [bindGroupLayout]
-        })
-
-        // Create bind group
-        const bindGroup = device.createBindGroup({
-          layout: bindGroupLayout,
-          entries: [
-            {
-              binding: 0,
-              resource: { buffer: uniformBuffer }
-            },
-            {
-              binding: 1,
-              resource: texture.createView()
-            },
-            {
-              binding: 2,
-              resource: sampler
-            }
-          ]
         })
 
         // Create render pipeline
@@ -291,6 +355,14 @@
             topology: "triangle-strip",
             stripIndexFormat: "uint32"
           }
+        })
+
+        // Initial encoding with default filter
+        await encodeTexture(mipmapFilterSelect.value)
+
+        // Re-encode when filter changes
+        mipmapFilterSelect.addEventListener("change", async e => {
+          await encodeTexture(e.target.value)
         })
 
         // Handle window resize

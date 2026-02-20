@@ -536,8 +536,11 @@ class Spark {
    *        the format is assumed to be "rgb". Supplying `alpha: true` will favor RGBA formats.
    *
    * @param {boolean} [options.mips=false] | [options.generateMipmaps=false]
-   *        Whether to generate mipmaps. Mipmaps are generated with a basic box filter
-   *        in linear space.
+   *        Whether to generate mipmaps.
+   *
+   * @param {string} [options.mipmapFilter="magic"]
+   *        The filter to use for mipmap generation. Can be "box" for a simple box filter,
+   *        or "magic" for a higher-quality 4-tap filter with sharpening properties.
    *
    * @param {number[]} [options.mipsAlphaScale]
    *        Optional array of alpha scale values to apply to each generated mipmap level.
@@ -673,7 +676,16 @@ class Spark {
     }
 
     if (mipmaps) {
-      this.#generateMipmaps(commandEncoder, inputTexture, mipmapCount, width, height, colorMode, options.mipsAlphaScale)
+      this.#generateMipmaps(
+        commandEncoder,
+        inputTexture,
+        mipmapCount,
+        width,
+        height,
+        colorMode,
+        options.mipsAlphaScale,
+        options.mipmapFilter
+      )
     }
 
     commandEncoder.popDebugGroup?.()
@@ -1437,7 +1449,7 @@ class Spark {
     pass.end()
   }
 
-  async #generateMipmaps(encoder, texture, mipmapCount, width, height, colorMode, mipsAlphaScale) {
+  async #generateMipmaps(encoder, texture, mipmapCount, width, height, colorMode, mipsAlphaScale, mipmapFilter) {
     if (mipsAlphaScale == undefined) this.#updateUniformBuffer(colorMode)
 
     let w = width
@@ -1452,8 +1464,7 @@ class Spark {
       }
     } else {
       const pass = encoder.beginComputePass()
-      // const pipeline = this.#mipmapPipeline
-      const pipeline = this.#magicMipmapPipeline
+      const pipeline = mipmapFilter === "box" ? this.#mipmapPipeline : this.#magicMipmapPipeline
       const layout = pipeline.getBindGroupLayout(0)
 
       pass.setPipeline(pipeline)
