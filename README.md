@@ -111,7 +111,7 @@ Load an image and encode it to a compressed GPU texture.
     Whether to generate mipmaps. Default: `false`.
 
   - **`mipmapFilter`** (`string`)
-    The filter to use for mipmap generation. Can be `"box"` for a simple box filter, or `"magic"` for a higher-quality 6-tap separable filter. Default: `"magic"`.
+    The filter to use for mipmap generation. Can be `"box"` for a simple box filter, or `"magic"` for a higher-quality 4-tap filter with sharpening properties. Default: `"magic"`.
 
   - **`mipsAlphaScale`** (`number[]`)
     Optional array of alpha scale values to apply to each generated mipmap level. The array should contain one value per mipmap level (starting with mip level 1, since level 0 is the base image). Each value multiplies the alpha channel of the corresponding mipmap level. Values greater than 1.0 increase opacity, while values less than 1.0 increase transparency. This is useful for techniques like alpha-tested mipmaps where you want to compensate for alpha loss at lower mip levels. If the array is shorter than the number of mipmap levels, the last value is used for remaining levels. Only applies when `mips` is `true`. Default: `undefined` (no scaling applied).
@@ -170,5 +170,4 @@ After registration, the loader will automatically encode textures with Spark whe
 - The JavaScript code is released under MIT license. 
 - Use of the *Spark* shaders is covered under the <a href="https://ludicon.com/sparkjs/eula.html">*spark.js* EULA</a>. 
 
-See https://ludicon.com/sparkjs#Licensing for details on how to use *spark.js* in commercial projects. 
-
+See https://ludicon.com/sparkjs#Licensing for details on how to use *spark.js* in commercial projects.
