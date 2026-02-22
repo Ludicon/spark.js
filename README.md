@@ -101,9 +101,6 @@ Load an image and encode it to a compressed GPU texture.
     
     Default: `rgb`.
 
-  - **`alpha`** 
-    Hint for the automatic format selector. When no explicit format is provided, the format is assumed to be `"rgb"`. Supplying `alpha: true` will default to "rgba" instead.
-
   - **`preferLowQuality`** 
     Hint for the automatic format selector. When the input format is `"rgb"` it chooses 8 bit per block formats like `"bc1"` or `"etc2"` instead of `"bc7"` or `"astc"`.
 
@@ -164,5 +161,4 @@ After registration, the loader will automatically encode textures with Spark whe
 - The JavaScript code is released under MIT license. 
 - Use of the *Spark* shaders is covered under the <a href="https://ludicon.com/sparkjs/eula.html">*spark.js* EULA</a>. 
 
-See https://ludicon.com/sparkjs#Licensing for details on how to use *spark.js* in commercial projects. 
-
+See https://ludicon.com/sparkjs#Licensing for details on how to use *spark.js* in commercial projects.
