@@ -247,12 +247,12 @@ async function loadShaderSource(shaderFile) {
   }
   let shaderCode = await loader()
 
-  // Strip Vulkan-specific layout qualifiers that aren't compatible with WebGL2
-  // Replace "layout(set = N) uniform" with just "uniform"
-  shaderCode = shaderCode.replace(/layout\s*\(\s*set\s*=\s*\d+\s*\)\s+uniform/g, "uniform")
-
-  // Remove constant_id layout qualifiers (Vulkan specialization constants)
-  shaderCode = shaderCode.replace(/layout\s*\(\s*constant_id\s*=\s*\d+\s*\)\s+const/g, "const")
+  // Add GLSL ES 3.00 header with precision qualifiers
+  const prefix = `#version 300 es
+precision highp float;
+precision highp int;
+`
+  shaderCode = prefix + shaderCode
 
   return shaderCode
 }
