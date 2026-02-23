@@ -299,6 +299,7 @@ export class SparkGL {
   #shaderCache = new Map()
   #verbose = false
   #encodeCounter = 0
+  #fullscreenVertexShader
 
   constructor(gl, options = {}) {
     if (!gl) {
@@ -312,6 +313,17 @@ export class SparkGL {
     if (options.preload) {
       this.#preloadShaders(options.preload)
     }
+  }
+  dispose() {
+    const gl = this.#gl
+
+    if (this.#fullscreenVertexShader) {
+      gl.deleteShader(this.#fullscreenVertexShader)
+    }
+    for (const program of this.#shaderCache.values()) {
+      gl.deleteProgram(program)
+    }
+    this.#shaderCache.clear()
   }
 
   /**
@@ -388,7 +400,7 @@ export class SparkGL {
     // Otherwise, try to match it based on the preferenceOrder. Formats are sorted by number of channel and quality.
     const preferenceOrder = preferLowQuality
       ? ["bc4-r", "eac-r", "bc5-rg", "eac-rg", "bc1-rgb", "etc2-rgb", "bc7-rgb", "astc-rgb", "astc-4x4-rgb", "bc7-rgba", "astc-rgba", "astc-4x4-rgba"]
-      : ["bc4-r", "eac-r", "bc5-rg", "eac-rg", "bc7-rgb", "bc1-rgb", "astc-rgb", "astc-4x4-rgb", "etc2-rgb", "bc7-rgba", "astc-rgba", "astc-4x4-rgba"]
+      : ["bc4-r", "eac-r", "bc5-rg", "eac-rg", "bc7-rgb", "astc-rgb", "astc-4x4-rgb", "bc1-rgb", "etc2-rgb", "bc7-rgba", "astc-rgba", "astc-4x4-rgba"]
 
     // This allows selecting the best format using a substring like "rgb" or "astc"
     for (const key of preferenceOrder) {
@@ -415,14 +427,15 @@ export class SparkGL {
 
     this.#time(`Loading shader: ${shaderFile}`)
 
+    if (!this.#fullscreenVertexShader) {
+      this.#fullscreenVertexShader = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SOURCE)
+    }
+
     // Load the spark shader code - these are complete fragment shaders
     const fragmentShaderSource = await loadShaderSource(shaderFile)
 
-    const vertexShader = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SOURCE)
     const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource)
-    const program = createProgram(gl, vertexShader, fragmentShader)
-
-    gl.deleteShader(vertexShader)
+    const program = createProgram(gl, this.#fullscreenVertexShader, fragmentShader)
     gl.deleteShader(fragmentShader)
 
     this.#timeEnd(`Loading shader: ${shaderFile}`)
@@ -435,7 +448,19 @@ export class SparkGL {
   async encodeTexture(image, options = {}) {
     const gl = this.#gl
 
-    // Parse options
+    // Load image if it's a URL
+    if (typeof image === "string") {
+      image = await loadImage(image)
+    }
+
+    // Diagnose image type
+    this.#log(`Image type: ${image.constructor.name}`)
+
+    const width = image.width || image.videoWidth
+    const height = image.height || image.videoHeight
+    assert(width && height)
+
+    // Choose format.
     let formatOption = options.format
 
     // Default to "rgb" if no format specified
@@ -443,7 +468,6 @@ export class SparkGL {
       formatOption = "rgb"
     }
 
-    // Try to get preferred format (handles substrings and exact matches)
     let format
     if (typeof formatOption === "string") {
       format = this.#getPreferredFormat(formatOption, options.preferLowQuality)
@@ -458,23 +482,10 @@ export class SparkGL {
       }
     }
 
+    // Load and compile shader program
+    const program = await this.#loadProgram(format)
+
     this.#log(`Selected format: ${SparkFormatName[format]}`)
-
-    // Load image if it's a URL
-    if (typeof image === "string") {
-      image = await loadImage(image)
-    }
-
-    // Diagnose image type
-    this.#log(`Image type: ${image.constructor.name}`)
-    this.#log(`Image instanceof HTMLImageElement: ${image instanceof HTMLImageElement}`)
-    this.#log(`Image instanceof ImageBitmap: ${image instanceof ImageBitmap}`)
-    this.#log(`Image instanceof HTMLCanvasElement: ${image instanceof HTMLCanvasElement}`)
-    this.#log(`Image instanceof HTMLVideoElement: ${image instanceof HTMLVideoElement}`)
-
-    const width = image.width || image.videoWidth
-    const height = image.height || image.videoHeight
-    assert(width && height)
 
     const blockSize = SparkBlockSize[format]
 
@@ -486,10 +497,8 @@ export class SparkGL {
 
     this.#log(`Using ${srgb ? "sRGB" : "linear"} color space`)
 
-    // Load and compile shader program
-    const program = await this.#loadProgram(format)
-
-    // Make sure we don't have any async code after this!
+    // Make sure we don't have any async code after this, otherwise timing will be incorrect
+    // and state restoration will fail.
     const timingLabel = `encodeTexture #${++this.#encodeCounter}`
     this.#time(timingLabel)
 
@@ -511,6 +520,13 @@ export class SparkGL {
       arrayBuffer: gl.getParameter(gl.ARRAY_BUFFER_BINDING),
       vertexArray: gl.getParameter(gl.VERTEX_ARRAY_BINDING)
     }
+
+    gl.activeTexture(gl.TEXTURE0)
+    gl.disable(gl.BLEND)
+    gl.disable(gl.DEPTH_TEST)
+    gl.disable(gl.STENCIL_TEST)
+    gl.disable(gl.CULL_FACE)
+    gl.disable(gl.SCISSOR_TEST)
 
     // Determine wrap mode
     const wrapMode = options.wrap || "repeat"
@@ -535,12 +551,11 @@ export class SparkGL {
       const MIN_MIP_SIZE = 4
       let w = width
       let h = height
-      while (w >= MIN_MIP_SIZE || h >= MIN_MIP_SIZE) {
+      while (w > MIN_MIP_SIZE || h > MIN_MIP_SIZE) {
         mipmapCount++
         w = Math.max(1, Math.floor(w / 2))
         h = Math.max(1, Math.floor(h / 2))
       }
-      this.#log(`Generating ${mipmapCount} mipmap levels`)
     }
 
     // Create input texture
@@ -553,7 +568,15 @@ export class SparkGL {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 0)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, image)
 
-    // If flipY is requested, render to an intermediate texture with flipped coordinates
+    // This kind of sucks. We need to flip the texture vertically manually because not all
+    // image loading code paths support flipping, and UNPACK_FLIP_Y_WEBGL does not appear to work.
+    // I think the problem is that it's emulated with shader changes, but we sample the texture
+    // with textureFetch, which appears to bypass that.
+
+    // gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, options.flipY)
+
+    // If we end up using the code below, let's move the program creation to #init.
+
     let encodeSrcTexture = srcTexture
     if (options.flipY) {
       this.#log("Flipping texture vertically")
@@ -572,59 +595,54 @@ export class SparkGL {
       gl.bindFramebuffer(gl.FRAMEBUFFER, flipFbo)
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, flippedTexture, 0)
 
-      // Simple blit shader to flip the texture
-      const blitVs = `#version 300 es
-        out vec2 vUV;
-        void main() {
-          float x = float((gl_VertexID & 1) << 2);
-          float y = float((gl_VertexID & 2) << 1);
-          vUV.x = x * 0.5;
-          vUV.y = 1.0 - (y * 0.5); // Flip Y coordinate
-          gl_Position = vec4(x - 1.0, y - 1.0, 0, 1);
-        }`
+      if (!this.#fullscreenVertexShader) {
+        this.#fullscreenVertexShader = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SOURCE)
+      }
 
-      const blitFs = `#version 300 es
+      // Simple blit shader to flip the texture using texelFetch
+      const flipFs = `#version 300 es
         precision mediump float;
         uniform sampler2D uTexture;
-        in vec2 vUV;
+        uniform ivec2 uTextureSize;
         out vec4 fragColor;
         void main() {
-          fragColor = texture(uTexture, vUV);
+          ivec2 coord = ivec2(gl_FragCoord.xy);
+          // Flip Y coordinate
+          coord.y = uTextureSize.y - 1 - coord.y;
+          fragColor = texelFetch(uTexture, coord, 0);
         }`
 
       const vsShader = gl.createShader(gl.VERTEX_SHADER)
-      gl.shaderSource(vsShader, blitVs)
+      gl.shaderSource(vsShader, VERTEX_SHADER_SOURCE)
       gl.compileShader(vsShader)
 
       const fsShader = gl.createShader(gl.FRAGMENT_SHADER)
-      gl.shaderSource(fsShader, blitFs)
+      gl.shaderSource(fsShader, flipFs)
       gl.compileShader(fsShader)
 
-      const blitProgram = gl.createProgram()
-      gl.attachShader(blitProgram, vsShader)
-      gl.attachShader(blitProgram, fsShader)
-      gl.linkProgram(blitProgram)
+      const flipProgram = gl.createProgram()
+      gl.attachShader(flipProgram, vsShader)
+      gl.attachShader(flipProgram, fsShader)
+      gl.linkProgram(flipProgram)
 
       // Render flipped texture
-      gl.useProgram(blitProgram)
+      gl.useProgram(flipProgram)
       gl.viewport(0, 0, width, height)
       gl.activeTexture(gl.TEXTURE0)
       gl.bindTexture(gl.TEXTURE_2D, srcTexture)
-      gl.uniform1i(gl.getUniformLocation(blitProgram, "uTexture"), 0)
+      gl.uniform1i(gl.getUniformLocation(flipProgram, "uTexture"), 0)
+      gl.uniform2i(gl.getUniformLocation(flipProgram, "uTextureSize"), width, height)
       gl.drawArrays(gl.TRIANGLES, 0, 3)
 
       // Cleanup blit resources
       gl.deleteShader(vsShader)
       gl.deleteShader(fsShader)
-      gl.deleteProgram(blitProgram)
+      gl.deleteProgram(flipProgram)
       gl.deleteFramebuffer(flipFbo)
       gl.deleteTexture(srcTexture)
 
       encodeSrcTexture = flippedTexture
     }
-
-    // Create FBO (we'll attach different textures for each mip level)
-    const fbo = gl.createFramebuffer()
 
     // Generate mipmaps if requested
     if (generateMipmaps) {
@@ -649,179 +667,65 @@ export class SparkGL {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
     }
 
-    // Set texture wrapping mode (already determined above)
+    // Set texture wrapping mode (as determined above)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
 
-    // Disable rendering state once for all mip levels
-    gl.disable(gl.BLEND)
-    gl.disable(gl.DEPTH_TEST)
-    gl.disable(gl.STENCIL_TEST)
-    gl.disable(gl.CULL_FACE)
-    gl.disable(gl.SCISSOR_TEST)
+    // Create temporary buffer.
+    // We bind it to PIXEL_PACK_BUFFER to copy the render target into it.
+    // We bind it to PIXEL_UNPACK_BUFFER to copy the contents to the compressed texture.
+    const dstBuffer = gl.createBuffer()
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, dstBuffer)
+    gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, dstBuffer)
 
-    // Flag to control encoding approach
-    const BATCH_MIPMAP_ENCODING = false // Set to true to batch all rendering before copies
+    const bw = Math.floor((width + 3) / 4)
+    const bh = Math.floor((height + 3) / 4)
+    const dstBufferSize = blockSize * bw * bh
 
-    if (BATCH_MIPMAP_ENCODING) {
-      // Batched approach: render all mips, then copy all mips
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, dstBufferSize, gl.STREAM_COPY)
 
-      // Calculate total buffer size needed for all mips
-      let totalBufferSize = 0
-      const mipInfos = []
-      for (let mipLevel = 0; mipLevel < mipmapCount; mipLevel++) {
-        const mipWidth = Math.max(1, Math.floor(width >> mipLevel))
-        const mipHeight = Math.max(1, Math.floor(height >> mipLevel))
-        const mipBw = Math.floor((mipWidth + 3) / 4)
-        const mipBh = Math.floor((mipHeight + 3) / 4)
-        const dstBufferSize = blockSize * mipBw * mipBh
+    // Create render target (uint) texture.
+    const mipDstTexture = gl.createTexture()
+    gl.bindTexture(gl.TEXTURE_2D, mipDstTexture)
+    gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, width, height)
 
-        mipInfos.push({
-          mipLevel,
-          mipWidth,
-          mipHeight,
-          mipBw,
-          mipBh,
-          dstBufferSize,
-          bufferOffset: totalBufferSize
-        })
+    // Create FBO and bind render target texture.
+    const fbo = gl.createFramebuffer()
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
+    gl.readBuffer(gl.COLOR_ATTACHMENT0)
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, mipDstTexture, 0)
 
-        totalBufferSize += dstBufferSize
-      }
+    // Setup rendering state
+    gl.useProgram(program)
 
-      this.#log(`Total buffer size for all mips: ${totalBufferSize} bytes`)
+    // Encode each mipmap level
+    for (let mipLevel = 0; mipLevel < mipmapCount; mipLevel++) {
+      const mipWidth = Math.max(1, Math.floor(width >> mipLevel))
+      const mipHeight = Math.max(1, Math.floor(height >> mipLevel))
+      const mipBw = Math.floor((mipWidth + 3) / 4)
+      const mipBh = Math.floor((mipHeight + 3) / 4)
+      const mipSize = blockSize * mipBw * mipBh
 
-      // Create separate render target textures for each mip level
-      const dstTextures = []
-      for (const info of mipInfos) {
-        const tex = gl.createTexture()
-        gl.bindTexture(gl.TEXTURE_2D, tex)
-        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, info.mipBw, info.mipBh)
-        dstTextures.push(tex)
-      }
+      // Bind input texture at current mip level
+      gl.bindTexture(gl.TEXTURE_2D, encodeSrcTexture)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, mipLevel)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, mipLevel)
 
-      // Create a single large buffer to hold all mip levels
-      const dstBuffer = gl.createBuffer()
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, dstBuffer)
-      gl.bufferData(gl.PIXEL_PACK_BUFFER, totalBufferSize, gl.STREAM_COPY)
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
+      // Draw fullscreen triangle on the render target using the FBO
+      gl.viewport(0, 0, mipBw, mipBh)
+      gl.drawArrays(gl.TRIANGLES, 0, 3)
 
-      // Phase 1: Render all mip levels
-      this.#log("Phase 1: Rendering all mip levels")
-      for (const info of mipInfos) {
-        this.#log(`Rendering mip level ${info.mipLevel}: ${info.mipWidth}x${info.mipHeight} (${info.mipBw}x${info.mipBh} blocks)`)
+      // Copy dst texture to pixel buffer object
+      gl.readPixels(0, 0, mipBw, mipBh, gl.RGBA_INTEGER, blockSize === 16 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0)
 
-        // Update FBO attachment to this mip's render target
-        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dstTextures[info.mipLevel], 0)
-
-        // Setup rendering state
-        gl.useProgram(program)
-
-        // Bind input texture to texture unit 0 (at the correct mip level)
-        gl.activeTexture(gl.TEXTURE0)
-        gl.bindTexture(gl.TEXTURE_2D, encodeSrcTexture)
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, info.mipLevel)
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, info.mipLevel)
-
-        // Draw fullscreen triangle on the render target using the FBO
-        gl.viewport(0, 0, info.mipBw, info.mipBh)
-        gl.drawArrays(gl.TRIANGLES, 0, 3)
-      }
-
-      // Phase 2: Read all mip levels to buffer
-      this.#log("Phase 2: Reading all mip levels to buffer")
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, dstBuffer)
-      for (const info of mipInfos) {
-        this.#log(`Reading mip level ${info.mipLevel} at offset ${info.bufferOffset}`)
-
-        // Bind the correct render target to read from
-        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dstTextures[info.mipLevel], 0)
-        gl.readBuffer(gl.COLOR_ATTACHMENT0)
-
-        gl.readPixels(0, 0, info.mipBw, info.mipBh, gl.RGBA_INTEGER, blockSize === 16 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, info.bufferOffset)
-      }
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
-
-      // Phase 3: Copy all mip levels to compressed texture
-      this.#log("Phase 3: Copying all mip levels to compressed texture")
-      gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, dstBuffer)
+      // Copy pixel buffer object to compressed texture at the curent mip level
       gl.bindTexture(gl.TEXTURE_2D, compressedTexture)
-      for (const info of mipInfos) {
-        this.#log(`Copying mip level ${info.mipLevel} from offset ${info.bufferOffset}`)
-        gl.compressedTexSubImage2D(gl.TEXTURE_2D, info.mipLevel, 0, 0, info.mipWidth, info.mipHeight, glFormat, info.dstBufferSize, info.bufferOffset)
-      }
-      gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, null)
-
-      // Cleanup batched resources
-      for (const tex of dstTextures) {
-        gl.deleteTexture(tex)
-      }
-      gl.deleteBuffer(dstBuffer)
-    } else {
-      // Original interleaved approach: render and copy each mip one at a time
-      this.#log("Using interleaved encoding approach")
-
-      // Encode each mipmap level (interleaved approach)
-      for (let mipLevel = 0; mipLevel < mipmapCount && !BATCH_MIPMAP_ENCODING; mipLevel++) {
-        const mipWidth = Math.max(1, Math.floor(width >> mipLevel))
-        const mipHeight = Math.max(1, Math.floor(height >> mipLevel))
-        const mipBw = Math.floor((mipWidth + 3) / 4)
-        const mipBh = Math.floor((mipHeight + 3) / 4)
-        const dstBufferSize = blockSize * mipBw * mipBh
-
-        this.#log(`Encoding mip level ${mipLevel}: ${mipWidth}x${mipHeight} (${mipBw}x${mipBh} blocks)`)
-
-        // Create/resize render target for this mip level
-        const mipDstTexture = gl.createTexture()
-        gl.bindTexture(gl.TEXTURE_2D, mipDstTexture)
-        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, mipBw, mipBh)
-
-        // Update FBO attachment
-        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, mipDstTexture, 0)
-
-        // Create temporary buffer for this mip level
-        const dstBuffer = gl.createBuffer()
-        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, dstBuffer)
-        gl.bufferData(gl.PIXEL_PACK_BUFFER, dstBufferSize, gl.STREAM_COPY)
-        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
-
-        // Setup rendering state
-        gl.useProgram(program)
-
-        // Bind input texture to texture unit 0 (at the correct mip level)
-        gl.activeTexture(gl.TEXTURE0)
-        gl.bindTexture(gl.TEXTURE_2D, encodeSrcTexture)
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, mipLevel)
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, mipLevel)
-
-        // Draw fullscreen triangle on the render target using the FBO
-        gl.viewport(0, 0, mipBw, mipBh)
-        gl.drawArrays(gl.TRIANGLES, 0, 3)
-
-        // Copy dst texture to pixel buffer object
-        gl.readBuffer(gl.COLOR_ATTACHMENT0)
-        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, dstBuffer)
-
-        gl.readPixels(0, 0, mipBw, mipBh, gl.RGBA_INTEGER, blockSize === 16 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0)
-
-        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
-
-        // Copy pixel buffer object to compressed texture at the correct mip level
-        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, dstBuffer)
-        gl.bindTexture(gl.TEXTURE_2D, compressedTexture)
-        gl.compressedTexSubImage2D(gl.TEXTURE_2D, mipLevel, 0, 0, mipWidth, mipHeight, glFormat, dstBufferSize, 0)
-        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, null)
-
-        // Cleanup this mip level's temporary resources
-        gl.deleteTexture(mipDstTexture)
-        gl.deleteBuffer(dstBuffer)
-      }
+      gl.compressedTexSubImage2D(gl.TEXTURE_2D, mipLevel, 0, 0, mipWidth, mipHeight, glFormat, mipSize, 0)
     }
 
     // Cleanup temporary resources
+    gl.deleteTexture(mipDstTexture)
+    gl.deleteBuffer(dstBuffer)
     gl.deleteFramebuffer(fbo)
     gl.deleteTexture(encodeSrcTexture)
 
