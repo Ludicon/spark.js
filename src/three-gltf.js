@@ -150,10 +150,10 @@ class GLTFSparkPlugin {
       format = "r"
     }
 
-    if (isNormal) {
-      format = "normal"
-    } else if (isUncompressed) {
+    if (isUncompressed) {
       format = ""
+    } else if (isNormal) {
+      format = "normal"
     }
 
     const loader = this.loaders[format]
