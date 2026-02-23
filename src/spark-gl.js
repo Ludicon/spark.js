@@ -678,8 +678,8 @@ export class SparkGL {
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, dstBuffer)
     gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, dstBuffer)
 
-    const bw = Math.floor((width + 3) / 4)
-    const bh = Math.floor((height + 3) / 4)
+    const bw = Math.ceil(width / 4)
+    const bh = Math.ceil(height / 4)
     const dstBufferSize = blockSize * bw * bh
 
     gl.bufferData(gl.PIXEL_PACK_BUFFER, dstBufferSize, gl.STREAM_COPY)
@@ -702,8 +702,8 @@ export class SparkGL {
     for (let mipLevel = 0; mipLevel < mipmapCount; mipLevel++) {
       const mipWidth = Math.max(1, Math.floor(width >> mipLevel))
       const mipHeight = Math.max(1, Math.floor(height >> mipLevel))
-      const mipBw = Math.floor((mipWidth + 3) / 4)
-      const mipBh = Math.floor((mipHeight + 3) / 4)
+      const mipBw = Math.ceil(mipWidth / 4)
+      const mipBh = Math.ceil(mipHeight / 4)
       const mipSize = blockSize * mipBw * mipBh
 
       // Bind input texture at current mip level
