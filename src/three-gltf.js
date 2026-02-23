@@ -187,8 +187,7 @@ class SparkLoader extends THREE.TextureLoader {
           // This is not understood by stock three.js
           // texture.userData.unpackNormal = THREE.NormalRGPacking
           if (textureObject.texture !== undefined) {
-            //if (textureObject.format == ...)
-            texture.format = THREE.RGFormat
+            texture.format = textureObject.format
           } else {
             if (texture.format == "bc5-rg-unorm") texture.format = THREE.RED_GREEN_RGTC2_Format
             else if (texture.format == "eac-rg11unorm") texture.format = THREE.RG11_EAC_Format
