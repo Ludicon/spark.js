@@ -264,12 +264,12 @@ void main() {
 }
 `
 
-function createShader(gl, type, source) {
+function createShader(gl, type, source, validate) {
   const shader = gl.createShader(type)
   gl.shaderSource(shader, source)
   gl.compileShader(shader)
 
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+  if (validate && !gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
     const info = gl.getShaderInfoLog(shader)
     gl.deleteShader(shader)
     throw new Error(`Shader compilation failed: ${info}`)
@@ -278,13 +278,13 @@ function createShader(gl, type, source) {
   return shader
 }
 
-function createProgram(gl, vertexShader, fragmentShader) {
+function createProgram(gl, vertexShader, fragmentShader, validate) {
   const program = gl.createProgram()
   gl.attachShader(program, vertexShader)
   gl.attachShader(program, fragmentShader)
   gl.linkProgram(program)
 
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+  if (validate && !gl.getProgramParameter(program, gl.LINK_STATUS)) {
     const info = gl.getProgramInfoLog(program)
     gl.deleteProgram(program)
     throw new Error(`Program linking failed: ${info}`)
@@ -296,8 +296,9 @@ function createProgram(gl, vertexShader, fragmentShader) {
 export class SparkGL {
   #gl
   #supportedFormats
-  #shaderCache = new Map()
+  #programs = []
   #verbose = false
+  #validateShaders = false
   #encodeCounter = 0
   #fullscreenVertexShader
 
@@ -307,6 +308,7 @@ export class SparkGL {
     }
     this.#gl = gl
     this.#verbose = options.verbose ?? false
+    this.#validateShaders = options.validateShaders ?? false
     this.#supportedFormats = detectWebGLFormats(gl, this.#verbose)
 
     // Handle preload option
@@ -320,10 +322,9 @@ export class SparkGL {
     if (this.#fullscreenVertexShader) {
       gl.deleteShader(this.#fullscreenVertexShader)
     }
-    for (const program of this.#shaderCache.values()) {
+    for (const program of this.#programs) {
       gl.deleteProgram(program)
     }
-    this.#shaderCache.clear()
   }
 
   /**
@@ -366,8 +367,8 @@ export class SparkGL {
 
     // Kick off parallel compilation
     for (const format of formatsToLoad) {
-      if (!this.#shaderCache.has(format)) {
-        // Don't await — let them compile in the background
+      if (format !== undefined && !this.#programs[format]) {
+        // Don't await and or validate. Let them load and compile in the background.
         this.#loadProgram(format).catch(err => {
           console.error(`Failed to preload program for format ${SparkFormatName[format]}:`, err)
         })
@@ -412,37 +413,35 @@ export class SparkGL {
     return undefined
   }
 
-  async #loadProgram(format) {
-    const cacheKey = format
-    if (this.#shaderCache.has(cacheKey)) {
-      return this.#shaderCache.get(cacheKey)
+  #loadProgram(format) {
+    if (this.#programs[format]) {
+      return this.#programs[format]
     }
 
-    const gl = this.#gl
-    const shaderFile = SparkShaderFiles[format]
+    const programPromise = (async () => {
+      const message = "Loading program for format: " + SparkFormatName[format]
+      this.#time(message)
 
-    if (!shaderFile) {
-      throw new Error(`No shader file for format: ${format}`)
-    }
+      const gl = this.#gl
+      const shaderFile = SparkShaderFiles[format]
 
-    this.#time(`Loading shader: ${shaderFile}`)
+      if (!this.#fullscreenVertexShader) {
+        this.#fullscreenVertexShader = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SOURCE, this.#validateShaders)
+      }
 
-    if (!this.#fullscreenVertexShader) {
-      this.#fullscreenVertexShader = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SOURCE)
-    }
+      const fragmentShaderSource = await loadShaderSource(shaderFile)
 
-    // Load the spark shader code - these are complete fragment shaders
-    const fragmentShaderSource = await loadShaderSource(shaderFile)
+      const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource, this.#validateShaders)
+      const program = createProgram(gl, this.#fullscreenVertexShader, fragmentShader, this.#validateShaders)
+      gl.deleteShader(fragmentShader)
 
-    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource)
-    const program = createProgram(gl, this.#fullscreenVertexShader, fragmentShader)
-    gl.deleteShader(fragmentShader)
+      this.#timeEnd(message)
 
-    this.#timeEnd(`Loading shader: ${shaderFile}`)
-    this.#log(`Loaded program for format: ${SparkFormatName[format]}`)
+      return program
+    })()
 
-    this.#shaderCache.set(cacheKey, program)
-    return program
+    this.#programs[format] = programPromise
+    return programPromise
   }
 
   async encodeTexture(image, options = {}) {
@@ -596,7 +595,7 @@ export class SparkGL {
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, flippedTexture, 0)
 
       if (!this.#fullscreenVertexShader) {
-        this.#fullscreenVertexShader = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SOURCE)
+        this.#fullscreenVertexShader = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SOURCE, this.#validateShaders)
       }
 
       // Simple blit shader to flip the texture using texelFetch
@@ -620,10 +619,7 @@ export class SparkGL {
       gl.shaderSource(fsShader, flipFs)
       gl.compileShader(fsShader)
 
-      const flipProgram = gl.createProgram()
-      gl.attachShader(flipProgram, vsShader)
-      gl.attachShader(flipProgram, fsShader)
-      gl.linkProgram(flipProgram)
+      const flipProgram = createProgram(gl, vsShader, fsShader, this.#validateShaders)
 
       // Render flipped texture
       gl.useProgram(flipProgram)
