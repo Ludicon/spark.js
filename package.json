@@ -19,6 +19,8 @@
   ],
   "scripts": {
     "build": "vite build",
+    "build:examples": "vite build --config vite.config.examples.js",
+    "build:examples:local": "BASE_PATH=/ vite build --config vite.config.examples.js",
     "watch": "vite build --watch",
     "serve": "vite --host --open /examples/index.html",
     "dev": "run-p watch serve",
