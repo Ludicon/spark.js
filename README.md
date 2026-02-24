@@ -56,9 +56,11 @@ npm run watch
 ```
 
 
-## Running examples
+## Examples
 
-To run local examples:
+Live examples are available at: **https://ludicon.github.io/spark.js/**
+
+To run examples locally with hot reload:
 
 ```bash
 npm run dev
@@ -164,5 +166,4 @@ After registration, the loader will automatically encode textures with Spark whe
 - The JavaScript code is released under MIT license. 
 - Use of the *Spark* shaders is covered under the <a href="https://ludicon.com/sparkjs/eula.html">*spark.js* EULA</a>. 
 
-See https://ludicon.com/sparkjs#Licensing for details on how to use *spark.js* in commercial projects. 
-
+See https://ludicon.com/sparkjs#Licensing for details on how to use *spark.js* in commercial projects.
