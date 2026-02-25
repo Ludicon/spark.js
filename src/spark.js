@@ -1,4 +1,5 @@
 import shaders from "./shaders"
+import { assert, loadImage, getSafariVersion, getFirefoxVersion } from "./utils.js"
 
 const SparkFormat = {
   ASTC_4x4_RGB: 0,
@@ -179,12 +180,6 @@ const SparkFormatIsRGB = [
   /* 17 */ true // BC7_RGB
 ]
 
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
-
 function isWebGPU(device) {
   return typeof GPUDevice != "undefined" && device instanceof GPUDevice
 }
@@ -198,34 +193,11 @@ function isIOS() {
   )
 }
 
-function getSafariVersion() {
-  const ua = navigator.userAgent
-  // Safari detection: must contain "Safari/" but NOT "Chrome" or "Chromium"
-  // Chrome's UA: "...Chrome/xxx Safari/xxx"
-  // Safari's UA: "...Safari/xxx" (without Chrome)
-  if (ua.includes("Chrome") || ua.includes("Chromium")) {
-    return null
-  }
-  const match = ua.match(/Safari\/(\d+(\.\d+)?)/)
-  return match && parseFloat(match[1])
-}
-
-function getFirefoxVersion() {
-  const match = navigator.userAgent.match(/Firefox\/(\d+(\.\d+)?)/)
-  return match && parseFloat(match[1])
-}
-
 function detectWebGPUFormats(device) {
   const supportedFormats = new Set()
 
   const formatMap = {
-    "texture-compression-bc": [
-      SparkFormat.BC1_RGB,
-      SparkFormat.BC4_R,
-      SparkFormat.BC5_RG,
-      SparkFormat.BC7_RGB,
-      SparkFormat.BC7_RGBA
-    ],
+    "texture-compression-bc": [SparkFormat.BC1_RG, SparkFormat.BC4_R, SparkFormat.BC5_RG, SparkFormat.BC7_RGB, SparkFormat.BC7_RGBA],
     "texture-compression-etc2": [SparkFormat.ETC2_RGB, SparkFormat.EAC_R, SparkFormat.EAC_RG],
     "texture-compression-astc": [SparkFormat.ASTC_4x4_RGB, SparkFormat.ASTC_4x4_RGBA]
   }
@@ -251,49 +223,6 @@ function imageToByteArray(image) {
 
   const imageData = ctx.getImageData(0, 0, image.width, image.height)
   return new Uint8Array(imageData.data.buffer)
-}
-
-function isSvgUrl(url) {
-  return /\.svg(?:$|\?)/i.test(url) || /^data:image\/svg\+xml[,;]/i.test(url)
-}
-
-function loadImageElement(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = "anonymous"
-    img.decoding = "async" // hint to decode off the main thread when possible
-    img.onload = () => resolve(img) // returns HTMLImageElement
-    img.onerror = reject
-    img.src = url
-  })
-}
-
-async function loadImageBitmap(url, opts = {}) {
-  const res = await fetch(url, { mode: "cors" })
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
-  const blob = await res.blob()
-
-  // Note: createImageBitmap doesn't support image/svg+xml
-  return createImageBitmap(blob, {
-    imageOrientation: opts.flipY ? "flipY" : "none",
-    colorSpaceConversion: opts.colorSpaceConversion ?? "none",
-    premultiplyAlpha: "none"
-  })
-}
-
-const webkitVersion = getSafariVersion()
-
-function loadImage(url) {
-  // webkit: loadImageElement is faster than createImageBitmap.
-  // webkit: certain images do not load correctly with loadImageBitmap.
-  // chrome: linear images load incorrectly with loadImageElement.
-  // chrome: loadImageBitmap is slightly faster.
-  // chrome: loadImageBitmap does not support svg files.
-  if (isSvgUrl(url) || webkitVersion) {
-    return loadImageElement(url)
-  } else {
-    return loadImageBitmap(url)
-  }
 }
 
 // This is prescribed by WebGPU.
@@ -356,12 +285,7 @@ class Spark {
    */
   static async create(device, options = {}) {
     const instance = new Spark()
-    await instance.#init(
-      device,
-      options.preload ?? false,
-      options.useTimestampQueries ?? false,
-      options.verbose ?? false
-    )
+    await instance.#init(device, options.preload ?? false, options.useTimestampQueries ?? false, options.verbose ?? false)
     return instance
   }
 
@@ -398,18 +322,7 @@ class Spark {
    * console.log("Supported formats:", formats);
    */
   enumerateSupportedFormats() {
-    const formats = [
-      "astc-4x4-rgb",
-      "astc-4x4-rgba",
-      "eac-r",
-      "eac-rg",
-      "etc2-rgb",
-      "bc1-rgb",
-      "bc4-r",
-      "bc5-rg",
-      "bc7-rgb",
-      "bc7-rgba"
-    ]
+    const formats = ["astc-4x4-rgb", "astc-4x4-rgba", "eac-r", "eac-rg", "etc2-rgb", "bc1-rgb", "bc4-r", "bc5-rg", "bc7-rgb", "bc7-rgba"]
     const supported = []
 
     for (const format of formats) {
@@ -488,10 +401,7 @@ class Spark {
   async selectPreferredOptions(source, options = {}) {
     // Only load the image if the format has not been specified by the user.
     if (options.format == undefined || options.format == "auto") {
-      const image =
-        source instanceof Image || source instanceof ImageBitmap || source instanceof GPUTexture
-          ? source
-          : await loadImage(source)
+      const image = source instanceof Image || source instanceof ImageBitmap || source instanceof GPUTexture ? source : await loadImage(source)
 
       options.format = "auto"
       const format = await this.#getBestMatchingFormat(options, image)
@@ -530,10 +440,6 @@ class Spark {
    *          - "auto" to analyze the input texture and detect the required channels.
    *            This has some overhead, so specifying a format explicitly is preferred.
    *
-   * @param {boolean} [options.alpha]
-   *        Hint for the automatic format selector. When no explicit format is provided,
-   *        the format is assumed to be "rgb". Supplying `alpha: true` will favor RGBA formats.
-   *
    * @param {boolean} [options.mips=false] | [options.generateMipmaps=false]
    *        Whether to generate mipmaps. Mipmaps are generated with a basic box filter
    *        in linear space.
@@ -555,10 +461,7 @@ class Spark {
     assert(this.#device, "Spark is not initialized")
 
     // @@ TODO: Add support for canvas elements, blobs and ArrayBuffers.
-    const image =
-      source instanceof Image || source instanceof ImageBitmap || source instanceof GPUTexture
-        ? source
-        : await loadImage(source)
+    const image = source instanceof Image || source instanceof ImageBitmap || source instanceof GPUTexture ? source : await loadImage(source)
     this.#log("Loaded image", image)
 
     const format = await this.#getBestMatchingFormat(options, image)
@@ -640,11 +543,7 @@ class Spark {
           viewFormats: viewFormats
         })
 
-        this.#device.queue.copyExternalImageToTexture(
-          { source: image },
-          { texture: tmpTexture },
-          { width: image.width, height: image.height }
-        )
+        this.#device.queue.copyExternalImageToTexture({ source: image }, { texture: tmpTexture }, { width: image.width, height: image.height })
 
         this.#processInputTexture(commandEncoder, tmpTexture, inputTexture, width, height, colorMode, options.flipY)
       }
@@ -1111,34 +1010,8 @@ class Spark {
 
     // Otherwise, try to match it based on the preferenceOrder. Formats are sorted by number of channel and quality.
     const preferenceOrder = preferLowQuality
-      ? [
-          "bc4-r",
-          "eac-r",
-          "bc5-rg",
-          "eac-rg",
-          "bc1-rgb",
-          "etc2-rgb",
-          "bc7-rgb",
-          "astc-rgb",
-          "astc-4x4-rgb",
-          "bc7-rgba",
-          "astc-rgba",
-          "astc-4x4-rgba"
-        ]
-      : [
-          "bc4-r",
-          "eac-r",
-          "bc5-rg",
-          "eac-rg",
-          "bc7-rgb",
-          "bc1-rgb",
-          "astc-rgb",
-          "astc-4x4-rgb",
-          "etc2-rgb",
-          "bc7-rgba",
-          "astc-rgba",
-          "astc-4x4-rgba"
-        ]
+      ? ["bc4-r", "eac-r", "bc5-rg", "eac-rg", "bc1-rgb", "etc2-rgb", "bc7-rgb", "astc-rgb", "astc-4x4-rgb", "bc7-rgba", "astc-rgba", "astc-4x4-rgba"]
+      : ["bc4-r", "eac-r", "bc5-rg", "eac-rg", "bc7-rgb", "bc1-rgb", "astc-rgb", "astc-4x4-rgb", "etc2-rgb", "bc7-rgba", "astc-rgba", "astc-4x4-rgba"]
 
     // This allows selecting the best format using a substring like "rgb" or "astc"
     for (const key of preferenceOrder) {
@@ -1152,10 +1025,7 @@ class Spark {
     if (options.format == undefined) {
       options.format = "rgb"
     } else if (options.format == "auto") {
-      if (options.alpha) {
-        if (this.#isFormatSupported(SparkFormat.BC7_RGBA)) return SparkFormat.BC7_RGBA
-        if (this.#isFormatSupported(SparkFormat.ASTC_4x4_RGBA)) return SparkFormat.ASTC_4x4_RGBA
-      } else if (options.srgb) {
+      if (options.srgb) {
         if (this.#isFormatSupported(SparkFormat.BC7_RGB)) return SparkFormat.BC7_RGB
         if (this.#isFormatSupported(SparkFormat.ASTC_4x4_RGB)) return SparkFormat.ASTC_4x4_RGB
         if (this.#isFormatSupported(SparkFormat.BC1_RGB)) return SparkFormat.BC1_RGB
