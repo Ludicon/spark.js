@@ -459,13 +459,8 @@ export class SparkGL {
     const height = image.height || image.videoHeight
     assert(width && height)
 
-    // Choose format.
-    let formatOption = options.format
-
-    // Default to "rgb" if no format specified
-    if (formatOption === undefined) {
-      formatOption = "rgb"
-    }
+    // Choose format. Default to "rgb" if no format specified
+    const formatOption = options.format ?? "rgb"
 
     let format
     if (typeof formatOption === "string") {
