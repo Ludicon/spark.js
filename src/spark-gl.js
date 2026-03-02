@@ -200,7 +200,8 @@ function detectWebGLFormats(gl, verbose = false) {
   }
 
   const s3tcExt = gl.getExtension("WEBGL_compressed_texture_s3tc")
-  if (s3tcExt) {
+  const s3tcSrgbExt = gl.getExtension("WEBGL_compressed_texture_s3tc_srgb")
+  if (s3tcExt || s3tcSrgbExt) {
     supportedFormats.add(SparkFormat.BC1_RGB)
   }
 
