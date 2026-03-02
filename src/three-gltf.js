@@ -174,7 +174,7 @@ class SparkLoader extends THREE.TextureLoader {
   load(url, onLoad, onProgress, onError) {
     const format = this.format
     const srgb = this.colorSpace === THREE.SRGBColorSpace
-    const mips = true
+    const mips = this.options.mips && true // If mips not specified, default to true
     const normal = this.options.normal // this.format == "rg"
 
     this.spark
