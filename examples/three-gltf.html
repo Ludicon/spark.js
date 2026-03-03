@@ -63,7 +63,7 @@
       await renderer.init()
 
       // Create spark device
-      const spark = await Spark.create(device, { preload: ["rgb", "rg", "r"] })
+      const spark = await Spark.create(device, { preload: ["rgb", "rg", "r"], cacheTempResources: true })
 
       // Scene
       const scene = new THREE.Scene()
@@ -94,6 +94,8 @@
       console.time("Load GLTF file")
 
       const gltf = await loader.loadAsync("./assets/DamagedHelmet.glb")
+
+      spark.freeTempResources()
 
       console.timeEnd("Load GLTF file")
 

@@ -272,6 +272,11 @@ class Spark {
   #queryBuffer
   #queryReadbackBuffer
 
+  #cacheTempResources = false
+  #cachedInputTexture = null
+  #cachedTmpTexture = null
+  #cachedOutputBuffer = null
+
   #encodeCounter = 0
   #verbose = false
 
@@ -280,12 +285,19 @@ class Spark {
    * @param {GPUDevice} device - WebGPU device.
    * @param {Object} options - Encoder options.
    * @param {boolean} options.preload - Whether to preload all encoder pipelines (false by default).
+   * @param {boolean} options.cacheTempResources - Whether to cache temporary resources for reuse across encodeTexture calls (false by default).
    * @param {boolean} options.verbose - Whether to enable verbose logging (false by default).
    * @returns {Promise<void>} Resolves when initialization is complete.
    */
   static async create(device, options = {}) {
     const instance = new Spark()
-    await instance.#init(device, options.preload ?? false, options.useTimestampQueries ?? false, options.verbose ?? false)
+    await instance.#init(
+      device,
+      options.preload ?? false,
+      options.useTimestampQueries ?? false,
+      options.verbose ?? false,
+      options.cacheTempResources ?? false
+    )
     return instance
   }
 
@@ -305,6 +317,8 @@ class Spark {
     this.#querySet.destroy()
     this.#queryBuffer.destroy()
     this.#queryReadbackBuffer.destroy()
+
+    this.freeTempResources()
   }
 
   #log(...args) {
@@ -322,6 +336,27 @@ class Spark {
   #timeEnd(label) {
     if (this.#verbose) {
       console.timeEnd(label)
+    }
+  }
+
+  /**
+   * Free cached temporary resources used by encodeTexture.
+   * Call this when you're done encoding textures to free up GPU memory.
+   */
+  freeTempResources() {
+    if (this.#cachedInputTexture) {
+      this.#cachedInputTexture.destroy()
+      this.#cachedInputTexture = null
+    }
+
+    if (this.#cachedTmpTexture) {
+      this.#cachedTmpTexture.destroy()
+      this.#cachedTmpTexture = null
+    }
+
+    if (this.#cachedOutputBuffer) {
+      this.#cachedOutputBuffer.destroy()
+      this.#cachedOutputBuffer = null
     }
   }
 
@@ -536,13 +571,31 @@ class Spark {
     let inputTexture
 
     if (needsProcessing || !(image instanceof GPUTexture && !mipmaps)) {
-      inputTexture = this.#device.createTexture({
-        size: [width, height, 1],
-        mipLevelCount: mipmapCount,
-        format: "rgba8unorm",
-        usage: inputUsage,
-        viewFormats: viewFormats
-      })
+      // Create or reuse input texture
+      const needsRealloc =
+        !this.#cacheTempResources ||
+        !this.#cachedInputTexture ||
+        this.#cachedInputTexture.width < width ||
+        this.#cachedInputTexture.height < height ||
+        this.#cachedInputTexture.mipLevelCount < mipmapCount
+
+      if (this.#cacheTempResources && this.#cachedInputTexture && !needsRealloc) {
+        inputTexture = this.#cachedInputTexture
+      } else {
+        if (this.#cacheTempResources && this.#cachedInputTexture) {
+          this.#cachedInputTexture.destroy()
+        }
+        inputTexture = this.#device.createTexture({
+          size: [width, height, 1],
+          mipLevelCount: mipmapCount,
+          format: "rgba8unorm",
+          usage: inputUsage,
+          viewFormats: viewFormats
+        })
+        if (this.#cacheTempResources) {
+          this.#cachedInputTexture = inputTexture
+        }
+      }
     }
 
     let tmpTexture
@@ -551,15 +604,31 @@ class Spark {
       if (image instanceof GPUTexture) {
         this.#processInputTexture(commandEncoder, image, inputTexture, width, height, srgb, options.flipY)
       } else {
-        // Allocate temporary texture using the input size. @@ This texture could be persistent.
-        tmpTexture = this.#device.createTexture({
-          size: [image.width, image.height, 1],
-          mipLevelCount: 1,
-          format: "rgba8unorm",
-          // RENDER_ATTACHMENT usage is necessary for copyExternalImageToTexture
-          usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-          viewFormats: viewFormats
-        })
+        // Create or reuse temporary texture using the input size
+        const needsTmpRealloc =
+          !this.#cacheTempResources ||
+          !this.#cachedTmpTexture ||
+          this.#cachedTmpTexture.width < image.width ||
+          this.#cachedTmpTexture.height < image.height
+
+        if (this.#cacheTempResources && this.#cachedTmpTexture && !needsTmpRealloc) {
+          tmpTexture = this.#cachedTmpTexture
+        } else {
+          if (this.#cacheTempResources && this.#cachedTmpTexture) {
+            this.#cachedTmpTexture.destroy()
+          }
+          tmpTexture = this.#device.createTexture({
+            size: [image.width, image.height, 1],
+            mipLevelCount: 1,
+            format: "rgba8unorm",
+            // RENDER_ATTACHMENT usage is necessary for copyExternalImageToTexture
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+            viewFormats: viewFormats
+          })
+          if (this.#cacheTempResources) {
+            this.#cachedTmpTexture = tmpTexture
+          }
+        }
 
         this.#device.queue.copyExternalImageToTexture({ source: image }, { texture: tmpTexture }, { width: image.width, height: image.height })
 
@@ -598,11 +667,22 @@ class Spark {
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
     })
 
-    // Allocate output buffer. @@ This buffer could be persistent.
-    const outputBuffer = this.#device.createBuffer({
-      size: outputSize,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
-    })
+    // Create or reuse output buffer
+    let outputBuffer
+    if (this.#cacheTempResources && this.#cachedOutputBuffer && this.#cachedOutputBuffer.size >= outputSize) {
+      outputBuffer = this.#cachedOutputBuffer
+    } else {
+      if (this.#cacheTempResources && this.#cachedOutputBuffer) {
+        this.#cachedOutputBuffer.destroy()
+      }
+      outputBuffer = this.#device.createBuffer({
+        size: outputSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+      })
+      if (this.#cacheTempResources) {
+        this.#cachedOutputBuffer = outputBuffer
+      }
+    }
 
     // Dispatch compute shader to encode the input texture in the output buffer.
     const label = `dispatch compute shader '${SparkFormatName[format]}' #${counter}`
@@ -690,19 +770,14 @@ class Spark {
 
     this.#timeEnd(label)
 
-    // Destroy temporary buffers/textures after the work is done.
-    // this.#device.queue.onSubmittedWorkDone().then(() => {
-    //   tmpTexture?.destroy()
-    //   inputTexture?.destroy()
-    //   outputBuffer?.destroy()
-    // })
-
-    // I think we can destroy these right away.
-    tmpTexture?.destroy()
-    if (inputTexture != image) {
-      inputTexture?.destroy()
+    // Cleanup temporary resources (unless cached)
+    if (!this.#cacheTempResources) {
+      tmpTexture?.destroy()
+      if (inputTexture != image) {
+        inputTexture?.destroy()
+      }
+      outputBuffer?.destroy()
     }
-    outputBuffer?.destroy()
 
     return outputTexture
   }
@@ -759,12 +834,13 @@ class Spark {
     return elapsedMilliseconds
   }
 
-  async #init(device, preload, useTimestampQueries, verbose) {
+  async #init(device, preload, useTimestampQueries, verbose, cacheTempResources) {
     assert(device, "device is required")
     assert(isWebGPU(device), "device is not a WebGPU device")
 
     this.#device = device
     this.#verbose = verbose
+    this.#cacheTempResources = cacheTempResources
 
     this.#supportedFormats = detectWebGPUFormats(this.#device)
     this.#defaultSampler = this.#device.createSampler({
