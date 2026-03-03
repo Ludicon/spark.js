@@ -301,6 +301,15 @@ export class SparkGL {
   #validateShaders = false
   #encodeCounter = 0
   #fullscreenVertexShader
+  #cacheTempResources = false
+  // Cached temporary resources for encodeTexture
+  #cachedBuffer = null
+  #cachedBufferSize = 0
+  #cachedTexture8 = null // For 8-byte per block formats
+  #cachedTexture16 = null // For 16-byte per block formats
+  #cachedTextureWidth = 0
+  #cachedTextureHeight = 0
+  #cachedFbo = null
 
   constructor(gl, options = {}) {
     if (!gl) {
@@ -309,6 +318,7 @@ export class SparkGL {
     this.#gl = gl
     this.#verbose = options.verbose ?? false
     this.#validateShaders = options.validateShaders ?? false
+    this.#cacheTempResources = options.cacheTempResources ?? false
     this.#supportedFormats = detectWebGLFormats(gl, this.#verbose)
 
     // Handle preload option
@@ -325,6 +335,9 @@ export class SparkGL {
     for (const program of this.#programs) {
       gl.deleteProgram(program)
     }
+
+    // Clean up cached temporary resources
+    this.freeTempResources()
   }
 
   /**
@@ -333,6 +346,7 @@ export class SparkGL {
    * @param {Object} options - Encoder options.
    * @param {boolean|string[]} options.preload - Whether to preload all encoder pipelines, or an array of format names to preload (false by default).
    * @param {boolean} options.verbose - Whether to enable verbose logging (false by default).
+   * @param {boolean} options.cacheTempResources - Whether to cache temporary resources for reuse across encodeTexture calls (false by default).
    * @returns {SparkGL} A new SparkGL instance.
    */
   static create(gl, options = {}) {
@@ -385,6 +399,38 @@ export class SparkGL {
   isFormatSupported(format) {
     const sparkFormat = typeof format === "string" ? SparkFormatMap[format] : format
     return this.#supportedFormats.has(sparkFormat)
+  }
+
+  /**
+   * Free cached temporary resources used by encodeTexture.
+   * Call this when you're done encoding textures to free up GPU memory.
+   */
+  freeTempResources() {
+    const gl = this.#gl
+
+    if (this.#cachedBuffer) {
+      gl.deleteBuffer(this.#cachedBuffer)
+      this.#cachedBuffer = null
+      this.#cachedBufferSize = 0
+    }
+
+    if (this.#cachedTexture8) {
+      gl.deleteTexture(this.#cachedTexture8)
+      this.#cachedTexture8 = null
+    }
+
+    if (this.#cachedTexture16) {
+      gl.deleteTexture(this.#cachedTexture16)
+      this.#cachedTexture16 = null
+    }
+
+    if (this.#cachedFbo) {
+      gl.deleteFramebuffer(this.#cachedFbo)
+      this.#cachedFbo = null
+    }
+
+    this.#cachedTextureWidth = 0
+    this.#cachedTextureHeight = 0
   }
 
   #isFormatSupported(format) {
@@ -662,27 +708,86 @@ export class SparkGL {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
 
-    // Create temporary buffer.
-    // We bind it to PIXEL_PACK_BUFFER to copy the render target into it.
-    // We bind it to PIXEL_UNPACK_BUFFER to copy the contents to the compressed texture.
-    const dstBuffer = gl.createBuffer()
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, dstBuffer)
-    gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, dstBuffer)
-
     const bw = Math.ceil(width / 4)
     const bh = Math.ceil(height / 4)
     const dstBufferSize = blockSize * bw * bh
     let byteLength = dstBufferSize
 
+    const cacheTempResources = this.#cacheTempResources
+
+    // Create or reuse temporary buffer.
+    let dstBuffer
+    if (cacheTempResources && this.#cachedBuffer && this.#cachedBufferSize >= dstBufferSize) {
+      dstBuffer = this.#cachedBuffer
+    } else {
+      if (cacheTempResources && this.#cachedBuffer) {
+        gl.deleteBuffer(this.#cachedBuffer)
+      }
+      dstBuffer = gl.createBuffer()
+      if (cacheTempResources) {
+        this.#cachedBuffer = dstBuffer
+        this.#cachedBufferSize = dstBufferSize
+      }
+    }
+    // We bind it to PIXEL_PACK_BUFFER to copy the render target into it.
+    // We bind it to PIXEL_UNPACK_BUFFER to copy the contents to the compressed texture.
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, dstBuffer)
+    gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, dstBuffer)
+
+    // @@ Can we skip this call?
     gl.bufferData(gl.PIXEL_PACK_BUFFER, dstBufferSize, gl.STREAM_COPY)
 
-    // Create render target (uint) texture.
-    const mipDstTexture = gl.createTexture()
-    gl.bindTexture(gl.TEXTURE_2D, mipDstTexture)
-    gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, width, height)
+    // Create or reuse render target (uint) texture.
+    // Need different textures for 8-byte and 16-byte per block formats.
+    let mipDstTexture
+    const needsRealloc = !cacheTempResources || this.#cachedTextureWidth < width || this.#cachedTextureHeight < height
 
-    // Create FBO and bind render target texture.
-    const fbo = gl.createFramebuffer()
+    if (blockSize === 8) {
+      if (cacheTempResources && this.#cachedTexture8 && !needsRealloc) {
+        mipDstTexture = this.#cachedTexture8
+      } else {
+        if (cacheTempResources && this.#cachedTexture8) {
+          gl.deleteTexture(this.#cachedTexture8)
+        }
+        mipDstTexture = gl.createTexture()
+        gl.bindTexture(gl.TEXTURE_2D, mipDstTexture)
+        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, width, height)
+        if (cacheTempResources) {
+          this.#cachedTexture8 = mipDstTexture
+          this.#cachedTextureWidth = width
+          this.#cachedTextureHeight = height
+        }
+      }
+    } else {
+      if (cacheTempResources && this.#cachedTexture16 && !needsRealloc) {
+        mipDstTexture = this.#cachedTexture16
+      } else {
+        if (cacheTempResources && this.#cachedTexture16) {
+          gl.deleteTexture(this.#cachedTexture16)
+        }
+        mipDstTexture = gl.createTexture()
+        gl.bindTexture(gl.TEXTURE_2D, mipDstTexture)
+        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, width, height)
+        if (cacheTempResources) {
+          this.#cachedTexture16 = mipDstTexture
+          this.#cachedTextureWidth = width
+          this.#cachedTextureHeight = height
+        }
+      }
+    }
+
+    // @@ Not sure it's worth caching the FBO instead of recreating it. We have to bind the
+    // dst texture to it and that may change depending on the format.
+    // Create or reuse FBO and bind render target texture.
+    let fbo
+    if (cacheTempResources && this.#cachedFbo) {
+      fbo = this.#cachedFbo
+    } else {
+      fbo = gl.createFramebuffer()
+      if (cacheTempResources) {
+        this.#cachedFbo = fbo
+      }
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
     gl.readBuffer(gl.COLOR_ATTACHMENT0)
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, mipDstTexture, 0)
@@ -716,10 +821,12 @@ export class SparkGL {
       gl.compressedTexSubImage2D(gl.TEXTURE_2D, mipLevel, 0, 0, mipWidth, mipHeight, glFormat, mipSize, 0)
     }
 
-    // Cleanup temporary resources
-    gl.deleteTexture(mipDstTexture)
-    gl.deleteBuffer(dstBuffer)
-    gl.deleteFramebuffer(fbo)
+    // Cleanup temporary resources (unless cached)
+    if (!cacheTempResources) {
+      gl.deleteTexture(mipDstTexture)
+      gl.deleteBuffer(dstBuffer)
+      gl.deleteFramebuffer(fbo)
+    }
     gl.deleteTexture(encodeSrcTexture)
 
     // Restore GL state
