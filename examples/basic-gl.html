@@ -6,16 +6,6 @@
     <style>
       body { margin: 0; font-family: sans-serif; }
       canvas { display: block; }
-      #info {
-        position: absolute;
-        top: 10px;
-        left: 10px;
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 10px;
-        border-radius: 5px;
-        font-size: 12px;
-      }
       #error {
         position: absolute;
         top: 50%;
@@ -33,21 +23,6 @@
 
   <body>
     <canvas id="glCanvas"></canvas>
-    <div id="info">
-      <div>
-        Format:
-        <span id="format">-</span>
-      </div>
-      <div>
-        Texture Size:
-        <span id="size">-</span>
-      </div>
-      <div>
-        Status:
-        <span id="status">Initializing...</span>
-      </div>
-    </div>
-
     <script type="module">
       import { SparkGL } from "@ludicon/spark.js"
 
@@ -59,13 +34,6 @@
           <p>${message}</p>
         `
         document.body.appendChild(errorDiv)
-      }
-
-      function updateInfo(key, value) {
-        const element = document.getElementById(key)
-        if (element) {
-          element.textContent = value
-        }
       }
 
       async function init() {
@@ -85,7 +53,6 @@
         canvas.height = window.innerHeight
 
         // Create SparkGL instance
-        updateInfo("status", "Creating SparkGL instance...")
         const spark = SparkGL.create(gl, { preload: ["rgb"], verbose: true })
 
         // Check supported formats
@@ -97,18 +64,12 @@
           return
         }
 
-        // Pick a format - prefer BC7 for desktop, ETC2 for mobile
-        updateInfo("status", "Loading image...")
-
         // Load and encode texture
         const imageUrl = "./assets/kodim23.avif"
         let compressedTexture
 
         try {
           compressedTexture = await spark.encodeTexture(imageUrl)
-          updateInfo("size", `${compressedTexture.width}x${compressedTexture.height}`)
-          updateInfo("format", compressedTexture.sparkFormatName)
-          updateInfo("status", "Texture compressed!")
           console.log("Compressed texture:", compressedTexture)
         } catch (error) {
           showError(`Failed to compress texture: ${error.message}`)
@@ -239,7 +200,6 @@
 
         window.addEventListener("resize", resize)
 
-        updateInfo("status", "Rendering...")
         render()
       }
 
