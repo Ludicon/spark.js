@@ -1011,7 +1011,7 @@ class Spark {
     // Otherwise, try to match it based on the preferenceOrder. Formats are sorted by number of channel and quality.
     const preferenceOrder = preferLowQuality
       ? ["bc4-r", "eac-r", "bc5-rg", "eac-rg", "bc1-rgb", "etc2-rgb", "bc7-rgb", "astc-rgb", "astc-4x4-rgb", "bc7-rgba", "astc-rgba", "astc-4x4-rgba"]
-      : ["bc4-r", "eac-r", "bc5-rg", "eac-rg", "bc7-rgb", "bc1-rgb", "astc-rgb", "astc-4x4-rgb", "etc2-rgb", "bc7-rgba", "astc-rgba", "astc-4x4-rgba"]
+      : ["bc4-r", "eac-r", "bc5-rg", "eac-rg", "bc7-rgb", "astc-rgb", "astc-4x4-rgb", "bc1-rgb", "etc2-rgb", "bc7-rgba", "astc-rgba", "astc-4x4-rgba"]
 
     // This allows selecting the best format using a substring like "rgb" or "astc"
     for (const key of preferenceOrder) {
