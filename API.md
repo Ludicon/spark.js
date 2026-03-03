@@ -39,7 +39,7 @@ Both classes provide the same encoding API and options with some minor differenc
 
 ## Initialization
 
-### WebGPU (Spark)
+### WebGPU
 
 ```js
 import { Spark } from "@ludicon/spark.js"
@@ -55,7 +55,7 @@ const device = await adapter.requestDevice({ requiredFeatures })
 const spark = await Spark.create(device, options)
 ```
 
-#### `Spark.create(device, options)` → `Promise<Spark>`
+#### `Spark.create(device, options)`
 
 Creates a new Spark instance for WebGPU.
 
@@ -78,7 +78,7 @@ Static method that inspects a WebGPU adapter and returns the list of features re
 
 **Returns:** `string[]` - Array of feature names to request (e.g., `["texture-compression-bc", "texture-compression-astc"]`)
 
-### WebGL2 (SparkGL)
+### WebGL2
 
 ```js
 import { SparkGL } from "@ludicon/spark.js"
@@ -91,7 +91,7 @@ const gl = canvas.getContext("webgl2")
 const spark = SparkGL.create(gl, options)
 ```
 
-#### `SparkGL.create(gl, options)` → `SparkGL`
+#### `SparkGL.create(gl, options)`
 
 Creates a new SparkGL instance for WebGL2.
 
@@ -106,13 +106,13 @@ Creates a new SparkGL instance for WebGL2.
   - `verbose` (`boolean`, default: `false`) - Enable verbose logging for debugging.
   - `validateShaders` (`boolean`, default: `false`) - Enable WebGL shader validation. Only enable thsi for debuggigng, as it disables async shader compilation.
 
-**Returns:** `SparkGL` - Initialized SparkGL instance (synchronous).
+**Returns:** `SparkGL` - Initialized SparkGL instance.
 
 ---
 
 ## Core Methods
 
-### `encodeTexture(source, options)` → `Promise<GPUTexture>` (Spark) or `Promise<{texture, format, ...}>` (SparkGL)
+### `encodeTexture(source, options)`
 
 Loads an image and encodes it to a compressed GPU texture.
 
@@ -180,22 +180,12 @@ Loads an image and encodes it to a compressed GPU texture.
   - `mipLevels` (`number`) - Number of mipmap levels
   - `byteLength` (`number`) - Size of the texture data in bytes
 
-**Example:**
 
-```js
-// WebGPU
-const texture = await spark.encodeTexture("image.jpg", { format: "rgb", mips: true, srgb: true })
-
-// WebGL2
-const result = await spark.encodeTexture("image.jpg", { format: "rgb",  mips: true, srgb: true })
-gl.bindTexture(gl.TEXTURE_2D, result.texture)
-```
-
-### `getSupportedFormats()` → `string[]`
+### `getSupportedFormats()`
 
 Returns list of compression formats supported on the current device.
 
-**Returns:** Array of format name strings
+**Returns:** `string[]` - Array of format name strings
 
 **Example:**
 
@@ -204,7 +194,7 @@ const formats = spark.getSupportedFormats()
 // ["bc7-rgba", "bc1-rgb", "etc2-rgb", ...]
 ```
 
-### `isFormatSupported(format)` → `boolean`
+### `isFormatSupported(format)`
 
 Checks if a specific format is supported.
 
