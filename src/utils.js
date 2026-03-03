@@ -61,13 +61,36 @@ export async function loadImageBitmap(url, opts = {}) {
 
 const webkitVersion = getSafariVersion()
 
-export function loadImage(url, opts = {}) {
+// Safari 18.2 (Tahoe) introduced support for SVG in copyExternalImageToTexture
+const SAFARI_TAHOE_VERSION = 619.1 // Safari 18.2
+const needsSvgImageBitmapWorkaround = webkitVersion && webkitVersion < SAFARI_TAHOE_VERSION
+
+async function convertImageElementToImageBitmap(img) {
+  // Render HTMLImageElement to canvas, then create ImageBitmap
+  const canvas = document.createElement("canvas")
+  canvas.width = img.naturalWidth || img.width
+  canvas.height = img.naturalHeight || img.height
+  const ctx = canvas.getContext("2d")
+  ctx.drawImage(img, 0, 0)
+
+  // Convert canvas to ImageBitmap
+  return createImageBitmap(canvas)
+}
+
+export async function loadImage(url, opts = {}) {
   // webkit: loadImageElement is faster than createImageBitmap.
   // webkit: certain images do not load correctly with loadImageBitmap.
   // chrome: linear images load incorrectly with loadImageElement.
   // chrome: loadImageBitmap is slightly faster.
   // chrome: loadImageBitmap does not support svg files.
-  if (isSvgUrl(url) || webkitVersion) {
+
+  const isSvg = isSvgUrl(url)
+
+  if (isSvg && needsSvgImageBitmapWorkaround) {
+    // Older Safari: load SVG as HTMLImageElement, then convert to ImageBitmap
+    const img = await loadImageElement(url)
+    return convertImageElementToImageBitmap(img)
+  } else if (isSvg || webkitVersion) {
     return loadImageElement(url)
   } else {
     return loadImageBitmap(url, opts)
