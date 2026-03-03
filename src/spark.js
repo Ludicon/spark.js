@@ -258,9 +258,9 @@ function computeMipmapLayout(w, h, blockSize, mipmaps) {
 class Spark {
   #device
   #supportedFormats
-  #pipelines = []
   #supportsFloat16
   #useFragmentShader = false
+  #pipelines = []
   #mipmapPipeline
   #resizePipeline
   #flipYPipeline
@@ -287,6 +287,24 @@ class Spark {
     const instance = new Spark()
     await instance.#init(device, options.preload ?? false, options.useTimestampQueries ?? false, options.verbose ?? false)
     return instance
+  }
+
+  dispose() {
+    for (const pipeline of this.#pipelines) {
+      pipeline.destroy()
+    }
+    this.#mipmapPipeline.destroy()
+    this.#resizePipeline.destroy()
+    this.#flipYPipeline.destroy()
+    this.#detectChannelCountPipeline.destroy()
+
+    this.#defaultSampler.destroy()
+    for (let i = 0; i < 3; i++) {
+      this.#uniformBuffer[i].destroy()
+    }
+    this.#querySet.destroy()
+    this.#queryBuffer.destroy()
+    this.#queryReadbackBuffer.destroy()
   }
 
   #log(...args) {
