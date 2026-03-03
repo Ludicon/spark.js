@@ -3,9 +3,9 @@ struct Params {
     alphaScale: f32,
 };
 
-const COLOR_LINEAR : u32 = 0u;
 const COLOR_SRGB   : u32 = 1u;
-const COLOR_NORMAL : u32 = 2u;
+const COLOR_ALPHA  : u32 = 2u;
+const COLOR_NORMAL : u32 = 4u;
 
 @group(0) @binding(0) var src : texture_2d<f32>;
 @group(0) @binding(1) var dst : texture_storage_2d<rgba8unorm, write>;
@@ -59,7 +59,7 @@ fn mipmap(@builtin(global_invocation_id) id : vec3<u32>) {
 
     var color = vec4f(0.0);
 
-    if (params.colorMode == COLOR_SRGB) {
+    if ((params.colorMode & COLOR_ALPHA) != 0) {
         let c00 = textureSampleLevel(src, smp, vec2f(uv0.x, uv0.y), 0);
         let c10 = textureSampleLevel(src, smp, vec2f(uv1.x, uv0.y), 0);
         let c01 = textureSampleLevel(src, smp, vec2f(uv0.x, uv1.y), 0);
@@ -96,11 +96,16 @@ fn mipmap(@builtin(global_invocation_id) id : vec3<u32>) {
     // let uv = (vec2f(id.xy) + vec2f(0.5)) * size_rcp;
     // var color = textureSampleLevel(src, smp, vec2f(uv.x, uv.y), 0);
 
-    if (params.colorMode == COLOR_SRGB) {
-        color = linear_to_srgb_vec4(color);
-        color.a = color.a * params.alphaScale;
-    } else if (params.colorMode == COLOR_NORMAL) {
+    if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
+    }
+    else {
+        if ((params.colorMode & COLOR_SRGB) != 0) {
+            color = linear_to_srgb_vec4(color);
+        }
+        if ((params.colorMode & COLOR_ALPHA) != 0) {
+            color.a = color.a * params.alphaScale;
+        }
     }
 
     textureStore(dst, id.xy, color);
@@ -139,12 +144,16 @@ fn magic_mipmap_simple(@builtin(global_invocation_id) id: vec3<u32>) {
 
     var color = accum;
 
-    if (params.colorMode == COLOR_SRGB) {
-        color = linear_to_srgb_vec4(color);
-        color.a = color.a * params.alphaScale;
-    }
-    else if (params.colorMode == COLOR_NORMAL) {
+    if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
+    }
+    else {
+        if ((params.colorMode & COLOR_SRGB) != 0) {
+            color = linear_to_srgb_vec4(color);
+        }
+        if ((params.colorMode & COLOR_ALPHA) != 0) {
+            color.a = color.a * params.alphaScale;
+        }
     }
 
     textureStore(dst, id.xy, color);
@@ -186,18 +195,10 @@ fn magic_mipmap(
             let uv = srcPos * sizeRcp;
 
             let color = textureSampleLevel(src, smp, uv, 0);
-            if (params.colorMode == COLOR_SRGB) {
-                sharedData[0 * N + flatIdx] = color.r * color.a;
-                sharedData[1 * N + flatIdx] = color.g * color.a;
-                sharedData[2 * N + flatIdx] = color.b * color.a;
-                sharedData[3 * N + flatIdx] = color.a;
-            }
-            else {
-                sharedData[0 * N + flatIdx] = color.r;
-                sharedData[1 * N + flatIdx] = color.g;
-                sharedData[2 * N + flatIdx] = color.b;
-                sharedData[3 * N + flatIdx] = color.a;
-            }
+            sharedData[0 * N + flatIdx] = color.r;
+            sharedData[1 * N + flatIdx] = color.g;
+            sharedData[2 * N + flatIdx] = color.b;
+            sharedData[3 * N + flatIdx] = color.a;
         }
     }
 
@@ -213,7 +214,7 @@ fn magic_mipmap(
     let w = array<f32, 4>(-0.125, 0.625, 0.625, -0.125);
     let sharedOffset = local_id.y * 2u * TILE_SIZE + local_id.x * 2u;
 
-    var accum = vec4<f32>(0.0);
+    var colorSum = vec4<f32>(0.0);
 
     // TODO: We could convolve each channel separately and branch based on the channel mask.
     for (var j = 0u; j < 4u; j = j + 1u) {
@@ -223,24 +224,21 @@ fn magic_mipmap(
             let c = vec4f(sharedData[sharedIdx], sharedData[N + sharedIdx], sharedData[2 * N + sharedIdx], sharedData[3 * N + sharedIdx]);
             row = row + w[i] * c;
         }
-        accum = accum + w[j] * row;
+        colorSum = colorSum + w[j] * row;
     }
 
-    var color = accum;
+    var color = colorSum;
 
-    if (params.colorMode == COLOR_SRGB) {
-        // Unpremultiply color
-        if (color.a >= 1.0 / 256.0) {
-            let scale = 1.0 / color.a;
-            color.r = color.r * scale;
-            color.g = color.g * scale;
-            color.b = color.b * scale;
-        }
-        color = linear_to_srgb_vec4(color);
-        color.a = color.a * params.alphaScale;
-    }
-    else if (params.colorMode == COLOR_NORMAL) {
+    if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
+    }
+    else {
+        if ((params.colorMode & COLOR_SRGB) != 0) {
+            color = linear_to_srgb_vec4(color);
+        }
+        if ((params.colorMode & COLOR_ALPHA) != 0) {
+            color.a = color.a * params.alphaScale;
+        }
     }
 
     textureStore(dst, id.xy, color);
@@ -256,10 +254,11 @@ fn resize(@builtin(global_invocation_id) id : vec3<u32>) {
     let uv = (vec2f(id.xy) + vec2f(0.5)) / vec2f(dstSize);
     var color = textureSampleLevel(src, smp, uv, 0);
 
-    if (params.colorMode == COLOR_SRGB) {
-        color = linear_to_srgb_vec4(color);
-    } else if (params.colorMode == COLOR_NORMAL) {
+    if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
+    }
+    else if ((params.colorMode & COLOR_SRGB) != 0) {
+        color = linear_to_srgb_vec4(color);
     }
 
     textureStore(dst, id.xy, color);
@@ -275,10 +274,11 @@ fn flipy(@builtin(global_invocation_id) id : vec3<u32>) {
     let uv = (vec2f(f32(id.x), f32(dstSize.y - 1u - id.y)) + vec2f(0.5)) / vec2f(dstSize);
     var color = textureSampleLevel(src, smp, uv, 0);
 
-    if (params.colorMode == COLOR_SRGB) {
-        color = linear_to_srgb_vec4(color);
-    } else if (params.colorMode == COLOR_NORMAL) {
+    if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
+    }
+    else if ((params.colorMode & COLOR_SRGB) != 0) {
+        color = linear_to_srgb_vec4(color);
     }
 
     textureStore(dst, id.xy, color);
@@ -320,7 +320,7 @@ fn mipmap_fs(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     // for all mipmaps.
     var color = textureSampleLevel(src, smp, uv, 0);
 
-    if (params.colorMode == 2) {
+    if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
     }
 
@@ -332,7 +332,7 @@ fn resize_fs(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 
     var color = textureSample(src, smp, uv);
 
-    if (params.colorMode == 2) {
+    if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
     }
 
@@ -344,7 +344,7 @@ fn flipy_fs(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 
     var color = textureSample(src, smp, vec2(uv.x, 1 - uv.y));
 
-    if (params.colorMode == 2) {
+    if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);
     }
 

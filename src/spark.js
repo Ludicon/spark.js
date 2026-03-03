@@ -107,6 +107,13 @@ const SparkFormatRatio = [
   /* 17 */ 4 // BC7_RGB
 ]
 
+const ColorMode = {
+  Linear: 0,
+  sRGB: 1,
+  Alpha: 2,
+  Normal: 4
+}
+
 const SparkFormatMap = Object.freeze({
   "astc-4x4-rgb": SparkFormat.ASTC_4x4_RGB,
   "astc-4x4-rgba": SparkFormat.ASTC_4x4_RGBA,
@@ -179,6 +186,13 @@ const SparkFormatIsRGB = [
   /* 16 */ true, // BC7_RGB
   /* 17 */ true // BC7_RGB
 ]
+
+function isFormatRGB(format) {
+  return SparkFormatIsRGB[format]
+}
+function isFormatAlpha(format) {
+  return format == SparkFormat.ASTC_4x4_RGBA || format == SparkFormat.BC7_RGBA
+}
 
 function isWebGPU(device) {
   return typeof GPUDevice != "undefined" && device instanceof GPUDevice
@@ -543,8 +557,12 @@ class Spark {
 
     // @@ Add a warning when the user requests srgb, but the selected format does not support it.
     // @@ We could potentially use a smaller format if the compressed format has fewer channels.
-    const srgb = (options.srgb || options.format?.endsWith("srgb")) && SparkFormatIsRGB[format]
-    const colorMode = srgb ? 1 : options.normal ? 2 : 0
+    const srgb = (options.srgb || options.format?.endsWith("srgb")) && isFormatRGB(format)
+
+    let colorMode = srgb ? ColorMode.sRGB : ColorMode.Linear
+    if (isFormatAlpha(format)) colorMode |= ColorMode.Alpha
+    if (options.normal) colorMode = ColorMode.Normal
+
     const webgpuFormat = SparkWebGPUFormats[format] + (srgb ? "-srgb" : "")
     const viewFormats = srgb ? ["rgba8unorm", "rgba8unorm-srgb"] : ["rgba8unorm"]
 
@@ -662,16 +680,7 @@ class Spark {
     }
 
     if (mipmaps) {
-      this.#generateMipmaps(
-        commandEncoder,
-        inputTexture,
-        mipmapCount,
-        width,
-        height,
-        colorMode,
-        options.mipsAlphaScale,
-        options.mipmapFilter
-      )
+      this.#generateMipmaps(commandEncoder, inputTexture, mipmapCount, width, height, colorMode, options.mipsAlphaScale, options.mipmapFilter)
     }
 
     commandEncoder.popDebugGroup?.()
@@ -1325,7 +1334,7 @@ class Spark {
           resource: inputTexture.createView({
             baseMipLevel: 0,
             mipLevelCount: 1,
-            format: colorMode == 1 ? "rgba8unorm-srgb" : "rgba8unorm",
+            format: (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm",
             usage: GPUTextureUsage.TEXTURE_BINDING
           })
         },
@@ -1358,7 +1367,7 @@ class Spark {
 
   // Apply scaling and flipY transform.
   #processInputTextureFragmentShader(encoder, inputTexture, outputTexture, width, height, colorMode, flipY) {
-    const format = colorMode == 1 ? "rgba8unorm-srgb" : "rgba8unorm"
+    const format = (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm"
 
     const dstView = outputTexture.createView({
       baseMipLevel: 0,
@@ -1392,7 +1401,7 @@ class Spark {
           resource: inputTexture.createView({
             baseMipLevel: 0,
             mipLevelCount: 1,
-            format: colorMode == 1 ? "rgba8unorm-srgb" : "rgba8unorm",
+            format: (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm",
             usage: GPUTextureUsage.TEXTURE_BINDING
           })
         },
@@ -1428,7 +1437,8 @@ class Spark {
       }
     } else {
       const pass = encoder.beginComputePass()
-      const pipeline = mipmapFilter === "box" ? this.#mipmapPipeline : this.#magicMipmapPipeline
+      // The sharp mipmap filter causes fireflies when the filtered alpha is close to 0, so use box instead.
+      const pipeline = mipmapFilter === "box" || (colorMode & ColorMode.Alpha) != 0 ? this.#mipmapPipeline : this.#magicMipmapPipeline
       const layout = pipeline.getBindGroupLayout(0)
 
       pass.setPipeline(pipeline)
@@ -1454,7 +1464,7 @@ class Spark {
           resource: texture.createView({
             baseMipLevel: srcLevel,
             mipLevelCount: 1,
-            format: colorMode == 1 ? "rgba8unorm-srgb" : "rgba8unorm",
+            format: (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm",
             usage: GPUTextureUsage.TEXTURE_BINDING
           })
         },
@@ -1484,7 +1494,7 @@ class Spark {
   }
 
   #generateMipLevelFragmentShader(encoder, texture, srcLevel, dstLevel, width, height, colorMode) {
-    const format = colorMode == 1 ? "rgba8unorm-srgb" : "rgba8unorm"
+    const format = (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm"
     const dstView = texture.createView({
       baseMipLevel: dstLevel,
       mipLevelCount: 1,
