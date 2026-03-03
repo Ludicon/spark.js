@@ -52,6 +52,7 @@ export default defineConfig({
         mipmaps: resolve(__dirname, "examples/mipmaps.html"),
         "mipmaps-gl": resolve(__dirname, "examples/mipmaps-gl.html"),
         svg: resolve(__dirname, "examples/svg.html"),
+        realtime: resolve(__dirname, "examples/realtime.html"),
         "three-basic": resolve(__dirname, "examples/three-basic.html"),
         "three-basic-gl": resolve(__dirname, "examples/three-basic-gl.html"),
         "three-gltf": resolve(__dirname, "examples/three-gltf.html"),
