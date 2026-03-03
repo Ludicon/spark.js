@@ -1,12 +1,12 @@
 # spark.js⚡️
 
-[![npm version](https://img.shields.io/npm/v/@ludicon/spark.js.svg)](https://www.npmjs.com/package/@ludicon/spark.js) [![install size](https://packagephobia.com/badge?p=@ludicon/spark.js)](https://packagephobia.com/result?p=@ludicon/spark.js) [![WebGPU](https://img.shields.io/badge/WebGPU-supported-green.svg)](https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API)
+[![npm version](https://img.shields.io/npm/v/@ludicon/spark.js.svg)](https://www.npmjs.com/package/@ludicon/spark.js) [![install size](https://packagephobia.com/badge?p=@ludicon/spark.js)](https://packagephobia.com/result?p=@ludicon/spark.js) [![WebGPU](https://img.shields.io/badge/WebGPU-supported-green.svg)](https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API) [![WebGL2](https://img.shields.io/badge/WebGL2-supported-blue.svg)](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API)
 
 Real-time texture compression library for the Web.
 
 [*spark.js*](https://ludicon.com/sparkjs) is a standalone JavaScript library that exposes a subset of the [*Spark*](https://ludicon.com/spark) codecs through a simple and lightweight API.
 
-It enables the use of standard image formats in WebGPU applications transcoding them at load-time to native GPU formats like BC7, ASTC, and ETC2, using fast, high-quality GPU encoders.
+It enables the use of standard image formats in WebGL and WebGPU applications transcoding them at load-time to native GPU formats like BC7, ASTC, and ETC2, using fast, high-quality GPU encoders.
 
 Try the [image viewer](https://ludicon.com/sparkjs/viewer/) or the [gltf demo](https://ludicon.com/sparkjs/gltf-demo/):
 
@@ -20,7 +20,7 @@ Try the [image viewer](https://ludicon.com/sparkjs/viewer/) or the [gltf demo](h
 npm install @ludicon/spark.js
 ```
 
-## Usage Example
+## WebGPU Usage Example
 
 ```js
 import { Spark } from "@ludicon/spark.js"
@@ -40,6 +40,24 @@ const texture = await spark.encodeTexture("image.avif")
 The main entry point is `spark.encodeTexture()`, which loads an image and transcodes it into a compressed `GPUTexture` using the selected format and options. The example above uses default settings, but `encodeTexture` supports additional parameters for mipmap generation, sRGB encoding, normal map processing, and more.
 
 If the input image dimensions are not multiples of the block size, it will be resized to meet GPU format requirements. For best results, use images with dimensions that are multiples of 4.
+
+## WebGL Usage Example
+
+```js
+import { SparkGL } from "@ludicon/spark.js"
+
+// Initialize a WebGL2 context with required extensions
+const canvas = document.createElement("canvas")
+const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true })
+
+// Create spark instance for the WebGL2 context
+const spark = await SparkGL.create(gl)
+
+// Load and encode an image into a WebGL texture
+const texture = await spark.encodeTexture("image.avif")
+```
+
+The main entry point is `spark.encodeTexture()`, which loads an image and transcodes it into a compressed WebGL texture object using the selected format and options. 
 
 
 ## Development
@@ -102,9 +120,6 @@ Load an image and encode it to a compressed GPU texture.
       - If you specify `auto`, the input texture is analyzed to detect the necessary number of channels. This has some overhead, it's always recommended to specify the format through one of the other methods. 
     
     Default: `rgb`.
-
-  - **`alpha`** 
-    Hint for the automatic format selector. When no explicit format is provided, the format is assumed to be `"rgb"`. Supplying `alpha: true` will default to "rgba" instead.
 
   - **`preferLowQuality`** 
     Hint for the automatic format selector. When the input format is `"rgb"` it chooses 8 bit per block formats like `"bc1"` or `"etc2"` instead of `"bc7"` or `"astc"`.

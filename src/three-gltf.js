@@ -1,4 +1,4 @@
-import * as THREE from "three/webgpu"
+import * as THREE from "three"
 
 const Channel = {
   R: 1, // 0001
@@ -150,10 +150,10 @@ class GLTFSparkPlugin {
       format = "r"
     }
 
-    if (isNormal) {
-      format = "normal"
-    } else if (isUncompressed) {
+    if (isUncompressed) {
       format = ""
+    } else if (isNormal) {
+      format = "normal"
     }
 
     const loader = this.loaders[format]
@@ -174,19 +174,29 @@ class SparkLoader extends THREE.TextureLoader {
   load(url, onLoad, onProgress, onError) {
     const format = this.format
     const srgb = this.colorSpace === THREE.SRGBColorSpace
-    const mips = true
+    const mips = this.options.mips && true // If mips not specified, default to true
     const normal = this.options.normal // this.format == "rg"
 
     this.spark
       .encodeTexture(url, { format, srgb, mips, normal, preferLowQuality: this.options.preferLowQuality })
-      .then(gpuTexture => {
+      .then(textureObject => {
+        // Handle both WebGPU (GPUTexture) and WebGL (object with .texture property)
+        const gpuTexture = textureObject.texture !== undefined ? textureObject.texture : textureObject
         const texture = new THREE.ExternalTexture(gpuTexture)
+        if (textureObject.texture !== undefined) {
+          texture.format = textureObject.format
+          texture.byteLength = textureObject.byteLength
+        }
         if (this.format == "rg" && "NormalRGPacking" in THREE) {
           // This is not understood by stock three.js
           // texture.userData.unpackNormal = THREE.NormalRGPacking
-          if (texture.format == "bc5-rg-unorm") texture.format = THREE.RED_GREEN_RGTC2_Format
-          else if (texture.format == "eac-rg11unorm") texture.format = THREE.RG11_EAC_Format
-          else texture.format = THREE.RGFormat
+          if (textureObject.texture !== undefined) {
+            texture.format = textureObject.format
+          } else {
+            if (texture.format == "bc5-rg-unorm") texture.format = THREE.RED_GREEN_RGTC2_Format
+            else if (texture.format == "eac-rg11unorm") texture.format = THREE.RG11_EAC_Format
+            else texture.format = THREE.RGFormat
+          }
         }
         onLoad(texture)
       })

@@ -1,0 +1,243 @@
+<!doctype html>
+<html>
+  <!-- prettier-ignore -->
+  <head>
+    <title>spark-gl.js mipmaps example</title>
+    <style>
+      body { margin: 0; background: black; }
+      canvas { display: block; }
+    </style>
+  </head>
+
+  <body>
+    <script type="module">
+      import { SparkGL } from "../src/spark-gl.js"
+
+      const errorMessage = `
+          <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
+            <h1>WebGL2 Not Supported</h1>
+            <p>This demo requires a browser with WebGL2 support.</p>
+            <p>Please try using a modern browser like <strong>Chrome</strong>, <strong>Firefox</strong>, <strong>Edge</strong>, or <strong>Safari</strong>.</p>
+            <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API" target="_blank">MDN: WebGL API</a></p>
+          </div>
+        `
+
+      async function initWebGL() {
+        const canvas = document.createElement("canvas")
+        document.body.appendChild(canvas)
+
+        const gl = canvas.getContext("webgl2")
+        if (!gl) {
+          document.body.innerHTML = errorMessage
+          throw new Error("WebGL2 not supported")
+        }
+
+        return { gl, canvas }
+      }
+
+      // Vertex shader
+      const vertexShader = `#version 300 es
+        uniform vec2 uCanvasSize;
+        uniform vec2 uTextureSize;
+
+        in vec2 aPosition;
+        in vec2 aTexCoord;
+
+        out vec2 vTexCoord;
+
+        void main() {
+          // Scale the position to maintain 2:1 aspect ratio
+          float aspect = 0.5 * (uTextureSize.y * uCanvasSize.x) / (uCanvasSize.y * uTextureSize.x);
+
+          vec2 scale = vec2(
+            min(1.0, 1.0 / aspect),
+            max(-1.0, -aspect)
+          );
+          vec2 scaledPos = aPosition * scale;
+
+          gl_Position = vec4(scaledPos, 0.0, 1.0);
+          vTexCoord = aTexCoord;
+        }
+      `
+
+      // Fragment shader
+      const fragmentShader = `#version 300 es
+        precision mediump float;
+
+        uniform sampler2D uTexture;
+
+        in vec2 vTexCoord;
+        out vec4 fragColor;
+
+        vec3 linear_to_srgb_vec3(vec3 c) {
+          bvec3 cutoff = lessThanEqual(c, vec3(0.0031308));
+          vec3 higher = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+          vec3 lower = c * 12.92;
+          return mix(higher, lower, cutoff);
+        }
+
+        void main() {
+          // Display the first 7 mipmaps
+          vec3 color = vec3(0.0);
+
+          if (vTexCoord.x < 1.0/2.0) {
+            color = textureLod(uTexture, vec2(2.0 * vTexCoord.x, vTexCoord.y), 0.0).xyz;
+          }
+          else if (vTexCoord.x < 3.0/4.0 && vTexCoord.y < 1.0/2.0) {
+            color = textureLod(uTexture, vec2(4.0 * vTexCoord.x - 2.0, 2.0 * vTexCoord.y), 1.0).xyz;
+          }
+          else if (vTexCoord.x < 7.0/8.0 && vTexCoord.y < 1.0/4.0) {
+            color = textureLod(uTexture, vec2(8.0 * vTexCoord.x - 6.0, 4.0 * vTexCoord.y), 2.0).xyz;
+          }
+          else if (vTexCoord.x < 15.0/16.0 && vTexCoord.y < 1.0/8.0) {
+            color = textureLod(uTexture, vec2(16.0 * vTexCoord.x - 14.0, 8.0 * vTexCoord.y), 3.0).xyz;
+          }
+          else if (vTexCoord.x < 31.0/32.0 && vTexCoord.y < 1.0/16.0) {
+            color = textureLod(uTexture, vec2(32.0 * vTexCoord.x - 30.0, 16.0 * vTexCoord.y), 4.0).xyz;
+          }
+          else if (vTexCoord.x < 63.0/64.0 && vTexCoord.y < 1.0/32.0) {
+            color = textureLod(uTexture, vec2(64.0 * vTexCoord.x - 62.0, 32.0 * vTexCoord.y), 5.0).xyz;
+          }
+          else if (vTexCoord.x < 127.0/128.0 && vTexCoord.y < 1.0/64.0) {
+            color = textureLod(uTexture, vec2(128.0 * vTexCoord.x - 126.0, 64.0 * vTexCoord.y), 6.0).xyz;
+          }
+
+          color = linear_to_srgb_vec3(color);
+
+          fragColor = vec4(color, 1.0);
+        }
+      `
+
+      function createShader(gl, type, source) {
+        const shader = gl.createShader(type)
+        gl.shaderSource(shader, source)
+        gl.compileShader(shader)
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          const info = gl.getShaderInfoLog(shader)
+          gl.deleteShader(shader)
+          throw new Error(`Shader compilation failed: ${info}`)
+        }
+
+        return shader
+      }
+
+      function createProgram(gl, vertexShader, fragmentShader) {
+        const program = gl.createProgram()
+        gl.attachShader(program, vertexShader)
+        gl.attachShader(program, fragmentShader)
+        gl.linkProgram(program)
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+          const info = gl.getProgramInfoLog(program)
+          gl.deleteProgram(program)
+          throw new Error(`Program linking failed: ${info}`)
+        }
+
+        return program
+      }
+
+      // Create vertex buffer
+      function createVertexBuffer(gl) {
+        // prettier-ignore
+        const vertices = new Float32Array([
+          // position (x, y), texCoord (u, v)
+          -1.0, -1.0, 0.0, 0.0, // bottom left
+           1.0, -1.0, 1.0, 0.0, // bottom right
+          -1.0,  1.0, 0.0, 1.0, // top left
+           1.0,  1.0, 1.0, 1.0  // top right
+        ])
+
+        const vertexBuffer = gl.createBuffer()
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer)
+        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW)
+        return vertexBuffer
+      }
+
+      // Main initialization
+      async function init() {
+        const { gl, canvas } = await initWebGL()
+
+        // Create SparkGL instance
+        const sparkGL = SparkGL.create(gl, { preload: ["rgb"], verbose: true })
+
+        const textureUrl = "./assets/paint.png"
+
+        // Encode texture with mipmaps
+        const textureObject = await sparkGL.encodeTexture(textureUrl, {
+          format: "rgb",
+          srgb: true,
+          generateMipmaps: true
+        })
+
+        console.log(`Encoded texture with ${textureObject.mipmapCount} mip levels`)
+
+        // Create vertex buffer
+        const vertexBuffer = createVertexBuffer(gl)
+
+        // Create shader program
+        const vs = createShader(gl, gl.VERTEX_SHADER, vertexShader)
+        const fs = createShader(gl, gl.FRAGMENT_SHADER, fragmentShader)
+        const program = createProgram(gl, vs, fs)
+
+        gl.deleteShader(vs)
+        gl.deleteShader(fs)
+
+        // Get attribute and uniform locations
+        const aPosition = gl.getAttribLocation(program, "aPosition")
+        const aTexCoord = gl.getAttribLocation(program, "aTexCoord")
+        const uCanvasSize = gl.getUniformLocation(program, "uCanvasSize")
+        const uTextureSize = gl.getUniformLocation(program, "uTextureSize")
+        const uTexture = gl.getUniformLocation(program, "uTexture")
+
+        // Setup vertex attributes
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer)
+        gl.enableVertexAttribArray(aPosition)
+        gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 16, 0)
+        gl.enableVertexAttribArray(aTexCoord)
+        gl.vertexAttribPointer(aTexCoord, 2, gl.FLOAT, false, 16, 8)
+
+        // Handle window resize
+        function resizeCanvas() {
+          const displayWidth = window.innerWidth
+          const displayHeight = window.innerHeight
+
+          if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+            canvas.width = displayWidth
+            canvas.height = displayHeight
+            gl.viewport(0, 0, displayWidth, displayHeight)
+          }
+        }
+        window.addEventListener("resize", resizeCanvas)
+        resizeCanvas()
+
+        // Render function
+        function render() {
+          gl.clearColor(0.0, 0.0, 0.0, 0.0)
+          gl.clear(gl.COLOR_BUFFER_BIT)
+
+          gl.useProgram(program)
+
+          // Set uniforms
+          gl.uniform2f(uCanvasSize, canvas.width, canvas.height)
+          gl.uniform2f(uTextureSize, textureObject.width, textureObject.height)
+
+          gl.activeTexture(gl.TEXTURE0)
+          gl.bindTexture(gl.TEXTURE_2D, textureObject.texture)
+          gl.uniform1i(uTexture, 0)
+
+          // Draw
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+
+          requestAnimationFrame(render)
+        }
+
+        render()
+      }
+
+      init().catch(error => {
+        console.error("Error initializing WebGL:", error)
+      })
+    </script>
+  </body>
+</html>

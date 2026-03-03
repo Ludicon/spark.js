@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <!-- prettier-ignore -->
+  <head>
+    <meta charset="utf-8" />
+    <title>three.js + spark-gl.js GLTF loader example</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body { background: #111; }
+      canvas { display: block; width: 100%; height: 100%; }
+    </style>
+  </head>
+
+  <body>
+    <script type="module">
+      import * as THREE from "three"
+      import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
+      import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
+      import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
+
+      import { SparkGL } from "../src/spark-gl.js"
+      import { registerSparkLoader } from "@ludicon/spark.js/three-gltf"
+
+      const errorHTML = `
+      <div style="color: #FFF; padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
+        <h1>WebGL2 Not Supported</h1>
+        <p>This demo requires a browser with WebGL2 support.</p>
+        <p>Please try using a modern browser like <strong>Chrome</strong>, <strong>Firefox</strong>, <strong>Edge</strong>, or <strong>Safari</strong>.</p>
+        <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API" target="_blank">MDN: WebGL API</a></p>
+      </div>`
+
+      // Create canvas and WebGL2 context
+      const canvas = document.createElement("canvas")
+      document.body.appendChild(canvas)
+
+      const gl = canvas.getContext("webgl2", { antialias: true })
+      if (!gl) {
+        document.body.innerHTML = errorHTML
+        throw new Error("WebGL2 not supported")
+      }
+
+      // Create WebGL renderer
+      const renderer = new THREE.WebGLRenderer({ canvas, context: gl, antialias: true })
+      renderer.setPixelRatio(window.devicePixelRatio)
+
+      // Create spark-gl instance
+      const spark = SparkGL.create(gl, { preload: ["rgb", "rg", "r"], verbose: true })
+
+      // Scene
+      const scene = new THREE.Scene()
+
+      // Camera
+      const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100)
+      camera.position.set(2, 2, 3)
+
+      // Controls
+      const controls = new OrbitControls(camera, canvas)
+
+      // Light
+      const light = new THREE.DirectionalLight(0xffffff, 1)
+      light.position.set(3, 5, 2)
+      scene.add(light)
+      scene.add(new THREE.AmbientLight(0xffffff))
+
+      // Environment map
+      const pmremGenerator = new THREE.PMREMGenerator(renderer)
+      pmremGenerator.compileEquirectangularShader()
+      const neutralEnvironment = pmremGenerator.fromScene(new RoomEnvironment()).texture
+      scene.environment = neutralEnvironment
+
+      // Load GLTF
+      const loader = new GLTFLoader()
+      registerSparkLoader(loader, spark)
+
+      console.time("Load GLTF file")
+
+      const gltf = await loader.loadAsync("./assets/DamagedHelmet.glb")
+
+      console.timeEnd("Load GLTF file")
+
+      const box = new THREE.Box3().setFromObject(gltf.scene)
+      const scale = box.getSize(new THREE.Vector3()).length()
+      gltf.scene.scale.multiplyScalar(4 / scale)
+
+      scene.add(gltf.scene)
+
+      // Handle resize
+      function resize() {
+        const canvas = document.querySelector("canvas")
+        if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+          canvas.width = window.innerWidth
+          canvas.height = window.innerHeight
+        }
+
+        camera.aspect = window.innerWidth / window.innerHeight
+        camera.updateProjectionMatrix()
+        renderer.setSize(window.innerWidth, window.innerHeight, false)
+      }
+
+      window.addEventListener("resize", resize)
+      resize()
+
+      // Animation loop
+      function animate() {
+        requestAnimationFrame(animate)
+        controls.update()
+        renderer.render(scene, camera)
+      }
+      animate()
+    </script>
+  </body>
+</html>
