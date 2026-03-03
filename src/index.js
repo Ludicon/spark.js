@@ -1,3 +1,4 @@
 import Spark from "./spark"
+import { SparkGL } from "./spark-gl"
 
-export { Spark }
+export { Spark, SparkGL }

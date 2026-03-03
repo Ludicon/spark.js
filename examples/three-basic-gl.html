@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+  <!-- prettier-ignore -->
+  <head>
+    <meta charset="utf-8" />
+    <title>three.js + spark-gl.js example</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body { background: #111; }
+      canvas { display: block; width: 100%; height: 100%; }
+    </style>
+  </head>
+
+  <body>
+    <script type="module">
+      import * as THREE from "three"
+      import { SparkGL } from "../src/spark-gl.js"
+
+      const errorHTML = `
+      <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
+        <h1>WebGL2 Not Supported</h1>
+        <p>This demo requires a browser with WebGL2 support.</p>
+        <p>Please try using a modern browser like <strong>Chrome</strong>, <strong>Firefox</strong>, <strong>Edge</strong>, or <strong>Safari</strong>.</p>
+        <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API" target="_blank">MDN: WebGL API</a></p>
+      </div>`
+
+      // Create canvas and WebGL2 context
+      const canvas = document.createElement("canvas")
+      document.body.appendChild(canvas)
+
+      const gl = canvas.getContext("webgl2")
+      if (!gl) {
+        document.body.innerHTML = errorHTML
+        throw new Error("WebGL2 not supported")
+      }
+
+      // Create WebGL renderer
+      const renderer = new THREE.WebGLRenderer({ canvas, context: gl })
+
+      // Create spark-gl instance
+      const sparkGL = SparkGL.create(gl, { verbose: true })
+
+      // Load and encode texture using spark-gl:
+      const textureObject = await sparkGL.encodeTexture("./assets/kodim23.avif", {
+        srgb: true,
+        flipY: true,
+        generateMipmaps: true
+      })
+
+      // Wrap the WebGL texture for three.js using ExternalTexture
+      const externalTex = new THREE.ExternalTexture(textureObject.texture)
+      //externalTex.image = { width: textureObject.width, height: textureObject.height }
+
+      // Basic unlit material using the external texture
+      const material = new THREE.MeshBasicMaterial({ map: externalTex })
+
+      const scene = new THREE.Scene()
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10)
+      camera.position.z = 1
+
+      const plane = new THREE.PlaneGeometry(2, 2)
+      const mesh = new THREE.Mesh(plane, material)
+      scene.add(mesh)
+
+      function resize() {
+        const displayWidth = window.innerWidth
+        const displayHeight = window.innerHeight
+
+        const canvas = document.querySelector("canvas")
+        if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+          canvas.width = displayWidth
+          canvas.height = displayHeight
+        }
+
+        const w = canvas.width
+        const h = canvas.height
+        renderer.setSize(w, h, false)
+
+        // Keep the quad square relative to the texture's aspect
+        const texW = textureObject?.width || 1
+        const texH = textureObject?.height || 1
+        const canvasAspect = w / h
+        const texAspect = texW / texH
+
+        // Fit texture to canvas while preserving its aspect
+        let sx = 1,
+          sy = 1
+        if (texAspect > canvasAspect) {
+          sy = canvasAspect / texAspect
+        } else {
+          sx = texAspect / canvasAspect
+        }
+        mesh.scale.set(sx, sy, 1)
+
+        renderer.render(scene, camera)
+      }
+
+      window.addEventListener("resize", resize)
+      resize()
+    </script>
+  </body>
+</html>

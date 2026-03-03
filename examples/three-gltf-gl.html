@@ -3,7 +3,7 @@
   <!-- prettier-ignore -->
   <head>
     <meta charset="utf-8" />
-    <title>three.js + spark.js GLTF loader example</title>
+    <title>three.js + spark-gl.js GLTF loader example</title>
     <style>
       html, body { height: 100%; margin: 0; }
       body { background: #111; }
@@ -13,57 +13,38 @@
 
   <body>
     <script type="module">
-      import * as THREE from "three/webgpu"
+      import * as THREE from "three"
       import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
       import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
       import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
 
-      import { Spark } from "@ludicon/spark.js"
+      import { SparkGL } from "../src/spark-gl.js"
       import { registerSparkLoader } from "@ludicon/spark.js/three-gltf"
 
       const errorHTML = `
       <div style="color: #FFF; padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
-        <h1>WebGPU Not Supported</h1>
-        <p>This demo requires a browser with WebGPU support.</p>
-        <p>Please try using <strong>Chrome</strong> or <strong>Edge</strong> with WebGPU enabled, or a recent version of <strong>Safari</strong> on macOS.</p>
-        <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API" target="_blank">MDN: WebGPU API</a></p>
+        <h1>WebGL2 Not Supported</h1>
+        <p>This demo requires a browser with WebGL2 support.</p>
+        <p>Please try using a modern browser like <strong>Chrome</strong>, <strong>Firefox</strong>, <strong>Edge</strong>, or <strong>Safari</strong>.</p>
+        <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API" target="_blank">MDN: WebGL API</a></p>
       </div>`
 
-      if (!navigator.gpu) {
-        document.body.innerHTML = errorHTML
-        throw new Error("WebGPU not supported")
-      }
-
-      let adapter = null
-      try {
-        adapter = await navigator.gpu.requestAdapter()
-      } catch (err) {
-        console.error("Error while requesting WebGPU adapter:", err)
-      }
-      if (!adapter) {
-        document.body.innerHTML = errorMessage
-        throw new Error("No appropriate GPUAdapter found")
-      }
-
-      const threeRevision = parseInt(THREE.REVISION, 10)
-      if (threeRevision < 180) {
-        throw new Error(`Three.js r180 or newer is required (found r${THREE.REVISION})`)
-      }
-
-      const requiredFeatures = Spark.getRequiredFeatures(adapter)
-      const device = await adapter.requestDevice({ requiredFeatures })
-
+      // Create canvas and WebGL2 context
       const canvas = document.createElement("canvas")
       document.body.appendChild(canvas)
 
-      const context = canvas.getContext("webgpu")
+      const gl = canvas.getContext("webgl2", { antialias: true })
+      if (!gl) {
+        document.body.innerHTML = errorHTML
+        throw new Error("WebGL2 not supported")
+      }
 
-      // Create WebGPU renderer with the given device:
-      const renderer = new THREE.WebGPURenderer({ canvas, device, context, antialias: true })
-      await renderer.init()
+      // Create WebGL renderer
+      const renderer = new THREE.WebGLRenderer({ canvas, context: gl, antialias: true })
+      renderer.setPixelRatio(window.devicePixelRatio)
 
-      // Create spark device
-      const spark = await Spark.create(device, { preload: ["rgb", "rg", "r"], cacheTempResources: true })
+      // Create spark-gl instance
+      const spark = SparkGL.create(gl, { preload: ["rgb", "rg", "r"], verbose: true })
 
       // Scene
       const scene = new THREE.Scene()
@@ -82,7 +63,7 @@
       scene.add(new THREE.AmbientLight(0xffffff))
 
       // Environment map
-      let pmremGenerator = new THREE.PMREMGenerator(renderer)
+      const pmremGenerator = new THREE.PMREMGenerator(renderer)
       pmremGenerator.compileEquirectangularShader()
       const neutralEnvironment = pmremGenerator.fromScene(new RoomEnvironment()).texture
       scene.environment = neutralEnvironment
@@ -95,8 +76,6 @@
 
       const gltf = await loader.loadAsync("./assets/DamagedHelmet.glb")
 
-      spark.freeTempResources()
-
       console.timeEnd("Load GLTF file")
 
       const box = new THREE.Box3().setFromObject(gltf.scene)
@@ -107,14 +86,15 @@
 
       // Handle resize
       function resize() {
-        const width = window.innerWidth
-        const height = window.innerHeight
-        const pixelRatio = window.devicePixelRatio || 1
+        const canvas = document.querySelector("canvas")
+        if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+          canvas.width = window.innerWidth
+          canvas.height = window.innerHeight
+        }
 
-        renderer.setDrawingBufferSize(width, height, pixelRatio)
-
-        camera.aspect = width / height
+        camera.aspect = window.innerWidth / window.innerHeight
         camera.updateProjectionMatrix()
+        renderer.setSize(window.innerWidth, window.innerHeight, false)
       }
 
       window.addEventListener("resize", resize)
