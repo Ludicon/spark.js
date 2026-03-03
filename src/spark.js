@@ -85,27 +85,6 @@ const SparkBlockSize = [
   /* 17 */ 16 // BC7_RGB
 ]
 
-// This are computed under the assumption that uncomprssed RGB8 is not supported.
-const SparkFormatRatio = [
-  /* 0  */ 4, // ASTC_4x4_RGB
-  /* 1  */ 4, // ASTC_4x4_RGBA
-  /* 2  */ 0,
-  /* 3  */ 0,
-  /* 4  */ 2, // EAC_R
-  /* 5  */ 2, // EAC_RG
-  /* 6  */ 8, // ETC2_RGB
-  /* 7  */ 0,
-  /* 8  */ 0,
-  /* 9  */ 8, // BC1_RGB
-  /* 10 */ 0,
-  /* 11 */ 0,
-  /* 12 */ 0,
-  /* 13 */ 2, // BC4_R
-  /* 14 */ 2, // BC5_RG
-  /* 15 */ 0,
-  /* 16 */ 4, // BC7_RGB
-  /* 17 */ 4 // BC7_RGB
-]
 
 const ColorMode = {
   Linear: 0,
@@ -382,26 +361,28 @@ class Spark {
    * (ASTC, ETC2, EAC, BCn) and filters it based on the formats actually supported
    * by the current device as determined by `Spark.supportedFormats`.
    *
-   * @returns {string[]} An array of format names (e.g., "bc1-rgb", "astc-4x4-rgba") that are supported on the current platform.
+   * @returns {string[]} An array of format names (e.g., "bc1-rgb", "astc-4x4-rgba") that are supported on the current device.
    *
    * @example
    * const spark = await Spark.create(device);
-   * const formats = spark.enumerateSupportedFormats();
+   * const formats = spark.getSupportedFormats();
    * console.log("Supported formats:", formats);
    */
-  enumerateSupportedFormats() {
-    const formats = ["astc-4x4-rgb", "astc-4x4-rgba", "eac-r", "eac-rg", "etc2-rgb", "bc1-rgb", "bc4-r", "bc5-rg", "bc7-rgb", "bc7-rgba"]
-    const supported = []
+  getSupportedFormats() {
+    return Array.from(this.#supportedFormats)
+      .map(format => SparkFormatName[format])
+      .filter(Boolean)
+  }
 
-    for (const format of formats) {
-      const sparkFormat = SparkFormatMap[format]
-      if (this.#isFormatSupported(sparkFormat)) {
-        const ratio = SparkFormatRatio[sparkFormat]
-        supported.push({ format, ratio })
-      }
-    }
-
-    return supported
+  /**
+   * Returns whether the given format is supported on the current device.
+   *
+   * @param {string} format
+   * @returns {boolean} `true` if the format is supported, `false` otherwise.
+   */
+  isFormatSupported(format) {
+    const sparkFormat = typeof format === "string" ? SparkFormatMap[format] : format
+    return this.#supportedFormats.has(sparkFormat)
   }
 
   /**
