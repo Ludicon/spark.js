@@ -48,10 +48,14 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "examples/index.html"),
         basic: resolve(__dirname, "examples/basic.html"),
+        "basic-gl": resolve(__dirname, "examples/basic-gl.html"),
         mipmaps: resolve(__dirname, "examples/mipmaps.html"),
+        "mipmaps-gl": resolve(__dirname, "examples/mipmaps-gl.html"),
         svg: resolve(__dirname, "examples/svg.html"),
         "three-basic": resolve(__dirname, "examples/three-basic.html"),
-        "three-gltf": resolve(__dirname, "examples/three-gltf.html")
+        "three-basic-gl": resolve(__dirname, "examples/three-basic-gl.html"),
+        "three-gltf": resolve(__dirname, "examples/three-gltf.html"),
+        "three-gltf-gl": resolve(__dirname, "examples/three-gltf-gl.html")
       }
     },
     target: "es2022",
