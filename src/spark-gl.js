@@ -116,7 +116,6 @@ const GL_COMPRESSED_RG11_EAC = 0x9272
 
 // GL internal format for render targets
 const GL_RGBA32UI = 0x8d70
-//const GL_RGBA16UI = 0x8239
 const GL_RGBA16UI = 0x8d76
 
 const SparkGLFormats = [
