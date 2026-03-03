@@ -54,7 +54,7 @@
       const context = canvas.getContext("webgpu")
 
       // Create WebGPU renderer with the given device:
-      const renderer = new THREE.WebGPURenderer({ device, context })
+      const renderer = new THREE.WebGPURenderer({ canvas, device, context })
       await renderer.init()
 
       // Create spark device
@@ -78,23 +78,16 @@
       scene.add(mesh)
 
       function resize() {
-        const displayWidth = window.innerWidth
-        const displayHeight = window.innerHeight
+        const width = window.innerWidth
+        const height = window.innerHeight
+        const pixelRatio = window.devicePixelRatio || 1
 
-        const canvas = document.querySelector("canvas")
-        if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-          canvas.width = displayWidth
-          canvas.height = displayHeight
-        }
-
-        const w = canvas.width
-        const h = canvas.height
-        renderer.setSize(w, h, false)
+        renderer.setDrawingBufferSize(width, height, pixelRatio)
 
         // Keep the quad square relative to the texture’s aspect
         const texW = gpuTexture?.width || 1
         const texH = gpuTexture?.height || 1
-        const canvasAspect = w / h
+        const canvasAspect = width / height
         const texAspect = texW / texH
 
         // Fit texture to canvas while preserving its aspect
