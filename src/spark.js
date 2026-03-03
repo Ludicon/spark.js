@@ -85,7 +85,6 @@ const SparkBlockSize = [
   /* 17 */ 16 // BC7_RGB
 ]
 
-
 const ColorMode = {
   Linear: 0,
   sRGB: 1,
@@ -669,12 +668,21 @@ class Spark {
     this.#timeEnd("create input texture #" + counter)
 
     // Allocate output texture.
-    const outputTexture = this.#device.createTexture({
-      size: [width, height, 1],
-      mipLevelCount: mipmapCount,
-      format: webgpuFormat,
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-    })
+    const reuseTexture =
+      options.outputTexture &&
+      options.outputTexture.width == width &&
+      options.outputTexture.height == height &&
+      options.outputTexture.mipLevelCount == mipmapCount &&
+      options.outputTexture.format == webgpuFormat
+
+    const outputTexture = reuseTexture
+      ? options.outputTexture
+      : this.#device.createTexture({
+          size: [width, height, 1],
+          mipLevelCount: mipmapCount,
+          format: webgpuFormat,
+          usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+        })
 
     // Create or reuse output buffer
     let outputBuffer

@@ -1,0 +1,415 @@
+<!doctype html>
+<html>
+  <!-- prettier-ignore -->
+  <head>
+    <title>spark.js - Realtime procedural texture (WebGPU)</title>
+    <style>
+      body { margin: 0; }
+      canvas { display: block; }
+    </style>
+  </head>
+
+  <body>
+    <script type="module">
+      import { Spark } from "@ludicon/spark.js"
+
+      const errorMessage = `
+          <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
+            <h1>WebGPU Not Supported</h1>
+            <p>This demo requires a browser with WebGPU support.</p>
+            <p>Please try using <strong>Chrome</strong> or <strong>Edge</strong> with WebGPU enabled, or a recent version of <strong>Safari</strong> on macOS.</p>
+            <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API" target="_blank">MDN: WebGPU API</a></p>
+          </div>
+        `
+
+      async function initWebGPU() {
+        if (!navigator.gpu) {
+          document.body.innerHTML = errorMessage
+          throw new Error("WebGPU not supported")
+        }
+
+        let adapter = null
+        try {
+          adapter = await navigator.gpu.requestAdapter()
+        } catch (err) {
+          console.error("Error while requesting WebGPU adapter:", err)
+        }
+        if (!adapter) {
+          document.body.innerHTML = errorMessage
+          throw new Error("No appropriate GPUAdapter found")
+        }
+
+        // Request WebGPU features that Spark needs.
+        const requiredFeatures = Spark.getRequiredFeatures(adapter)
+        const device = await adapter.requestDevice({ requiredFeatures })
+
+        const canvas = document.createElement("canvas")
+        document.body.appendChild(canvas)
+
+        const context = canvas.getContext("webgpu")
+        const canvasFormat = navigator.gpu.getPreferredCanvasFormat()
+
+        context.configure({
+          device,
+          format: canvasFormat,
+          alphaMode: "opaque"
+        })
+
+        return { device, context, canvasFormat }
+      }
+
+      // Procedural texture compute shader (translated from GLSL)
+      const proceduralShader = `
+        @group(0) @binding(0) var dst: texture_storage_2d<rgba8unorm, write>;
+
+        struct Uniforms {
+          time: f32,
+          width: f32,
+          height: f32,
+        }
+        @group(0) @binding(1) var<uniform> uniforms: Uniforms;
+
+        const PI: f32 = 3.14159265;
+
+        @compute @workgroup_size(16, 16, 1)
+        fn main(@builtin(global_invocation_id) gid: vec3u) {
+          let uv = vec2f(gid.xy) / vec2f(uniforms.width, uniforms.height);
+
+          let t = uniforms.time * 10.0;
+          let vp = vec2f(512.0, 512.0);
+
+          let p0 = (uv - 0.5) * vp;
+          let hvp = vp * 0.5;
+          let p1d = vec2f(cos(t / 98.0), sin(t / 178.0)) * hvp - p0;
+          let p2d = vec2f(sin(-t / 124.0), cos(-t / 104.0)) * hvp - p0;
+          let p3d = vec2f(cos(-t / 165.0), cos(t / 45.0)) * hvp - p0;
+
+          let sum = 0.5 + 0.5 * (
+            cos(length(p1d) / 30.0) +
+            cos(length(p2d) / 20.0) +
+            sin(length(p3d) / 25.0) * sin(p3d.x / 20.0) * sin(p3d.y / 15.0)
+          );
+
+          let i = fract(sum);
+          let t2 = (64.0 * uniforms.time) / vec3f(63.0, 78.0, 45.0);
+          var cs = cos(i * PI * 2.0 + vec3f(0.0, 1.0, -0.5) * PI + t2);
+          cs = 0.5 * cs + 0.5;
+
+          textureStore(dst, gid.xy, vec4f(cs, cs.x));
+        }
+      `
+
+      // Vertex shader for rendering
+      const vertexShader = `
+        struct Uniforms {
+          canvasWidth: f32,
+          canvasHeight: f32,
+          textureWidth: f32,
+          textureHeight: f32,
+        }
+        @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+        struct VertexOutput {
+          @builtin(position) position: vec4f,
+          @location(0) texCoord: vec2f,
+        }
+
+        @vertex
+        fn main(@location(0) position: vec2f,
+                @location(1) texCoord: vec2f) -> VertexOutput {
+          var output: VertexOutput;
+
+          // Scale the position to maintain 1:1 aspect ratio
+          let aspect = (uniforms.textureHeight * uniforms.canvasWidth) / (uniforms.canvasHeight * uniforms.textureWidth);
+
+          let scale = vec2f(
+            min(1.0, 1.0 / aspect),
+            max(-1.0, -aspect));
+          let scaledPos = position * scale;
+
+          output.position = vec4f(scaledPos, 0.0, 1.0);
+          output.texCoord = texCoord;
+          return output;
+        }
+      `
+
+      // Fragment shader for rendering
+      const fragmentShader = `
+        @group(0) @binding(1) var t_diffuse: texture_2d<f32>;
+        @group(0) @binding(2) var s_diffuse: sampler;
+
+        @fragment
+        fn main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
+          var color = textureSampleLevel(t_diffuse, s_diffuse, texCoord, 0.0).xyz;
+          return vec4f(color, 1.0);
+        }
+      `
+
+      // Create vertex buffer
+      function createVertexBuffer(device) {
+        // prettier-ignore
+        const vertices = new Float32Array([
+          // position (x, y), texCoord (u, v)
+          -1.0, -1.0, 0.0, 0.0, // bottom left
+           1.0, -1.0, 1.0, 0.0, // bottom right
+          -1.0,  1.0, 0.0, 1.0, // top left
+           1.0,  1.0, 1.0, 1.0  // top right
+        ])
+
+        const vertexBuffer = device.createBuffer({
+          size: vertices.byteLength,
+          usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+        })
+        device.queue.writeBuffer(vertexBuffer, 0, vertices)
+        return vertexBuffer
+      }
+
+      // Main initialization
+      async function init() {
+        const { device, context, canvasFormat } = await initWebGPU()
+
+        // Create Spark instance with caching for better performance
+        const spark = await Spark.create(device, {
+          preload: ["rgb"],
+          cacheTempResources: true
+        })
+
+        // Create vertex buffer
+        const vertexBuffer = createVertexBuffer(device)
+
+        // Procedural texture size
+        const textureWidth = 1024
+        const textureHeight = 1024
+
+        // Create procedural texture
+        const proceduralTexture = device.createTexture({
+          size: [textureWidth, textureHeight, 1],
+          format: "rgba8unorm",
+          usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC
+        })
+
+        // Create uniform buffer for procedural shader
+        const proceduralUniformBuffer = device.createBuffer({
+          size: 12, // 3 floats (time, width, height)
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        })
+
+        // Create compute pipeline for procedural generation
+        const computeBindGroupLayout = device.createBindGroupLayout({
+          entries: [
+            {
+              binding: 0,
+              visibility: GPUShaderStage.COMPUTE,
+              storageTexture: { access: "write-only", format: "rgba8unorm" }
+            },
+            {
+              binding: 1,
+              visibility: GPUShaderStage.COMPUTE,
+              buffer: { type: "uniform" }
+            }
+          ]
+        })
+
+        const computePipelineLayout = device.createPipelineLayout({
+          bindGroupLayouts: [computeBindGroupLayout]
+        })
+
+        const computePipeline = device.createComputePipeline({
+          layout: computePipelineLayout,
+          compute: {
+            module: device.createShaderModule({ code: proceduralShader }),
+            entryPoint: "main"
+          }
+        })
+
+        const computeBindGroup = device.createBindGroup({
+          layout: computeBindGroupLayout,
+          entries: [
+            {
+              binding: 0,
+              resource: proceduralTexture.createView()
+            },
+            {
+              binding: 1,
+              resource: { buffer: proceduralUniformBuffer }
+            }
+          ]
+        })
+
+        // Create uniform buffer for canvas dimensions
+        const renderUniformBuffer = device.createBuffer({
+          size: 16, // 4 floats (canvasWidth, canvasHeight, textureWidth, textureHeight)
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        })
+
+        // Create sampler
+        const sampler = device.createSampler({
+          magFilter: "linear",
+          minFilter: "linear"
+        })
+
+        // Create bind group layout for rendering
+        const renderBindGroupLayout = device.createBindGroupLayout({
+          entries: [
+            {
+              binding: 0,
+              visibility: GPUShaderStage.VERTEX,
+              buffer: { type: "uniform" }
+            },
+            {
+              binding: 1,
+              visibility: GPUShaderStage.FRAGMENT,
+              texture: { sampleType: "float" }
+            },
+            {
+              binding: 2,
+              visibility: GPUShaderStage.FRAGMENT,
+              sampler: { type: "filtering" }
+            }
+          ]
+        })
+
+        // Create pipeline layout for rendering
+        const renderPipelineLayout = device.createPipelineLayout({
+          bindGroupLayouts: [renderBindGroupLayout]
+        })
+
+        // Create render pipeline
+        const renderPipeline = device.createRenderPipeline({
+          layout: renderPipelineLayout,
+          vertex: {
+            module: device.createShaderModule({ code: vertexShader }),
+            entryPoint: "main",
+            buffers: [
+              {
+                arrayStride: 16,
+                attributes: [
+                  {
+                    // position
+                    shaderLocation: 0,
+                    offset: 0,
+                    format: "float32x2"
+                  },
+                  {
+                    // texCoord
+                    shaderLocation: 1,
+                    offset: 8,
+                    format: "float32x2"
+                  }
+                ]
+              }
+            ]
+          },
+          fragment: {
+            module: device.createShaderModule({ code: fragmentShader }),
+            entryPoint: "main",
+            targets: [
+              {
+                format: canvasFormat
+              }
+            ]
+          },
+          primitive: {
+            topology: "triangle-strip",
+            stripIndexFormat: "uint32"
+          }
+        })
+
+        // Handle window resize
+        function resizeCanvas() {
+          const displayWidth = window.innerWidth
+          const displayHeight = window.innerHeight
+
+          const canvas = document.querySelector("canvas")
+          if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+            canvas.width = displayWidth
+            canvas.height = displayHeight
+
+            // Update uniform buffer with new dimensions
+            const uniformData = new Float32Array([displayWidth, displayHeight, textureWidth, textureHeight])
+            device.queue.writeBuffer(renderUniformBuffer, 0, uniformData)
+          }
+        }
+        window.addEventListener("resize", resizeCanvas)
+        resizeCanvas()
+
+        let startTime = performance.now()
+        let compressedTexture
+
+        // Render function
+        async function render() {
+          const currentTime = (performance.now() - startTime) / 1000.0
+
+          // Update procedural shader uniforms
+          const proceduralUniforms = new Float32Array([currentTime, textureWidth, textureHeight])
+          device.queue.writeBuffer(proceduralUniformBuffer, 0, proceduralUniforms)
+
+          // Generate procedural texture
+          const computeEncoder = device.createCommandEncoder()
+          const computePass = computeEncoder.beginComputePass()
+          computePass.setPipeline(computePipeline)
+          computePass.setBindGroup(0, computeBindGroup)
+          computePass.dispatchWorkgroups(Math.ceil(textureWidth / 16), Math.ceil(textureHeight / 16), 1)
+          computePass.end()
+          device.queue.submit([computeEncoder.finish()])
+
+          // Encode the procedural texture with Spark, note we pass the existing compressedTexture
+          // so that it does not need to be reallocated.
+          compressedTexture = await spark.encodeTexture(proceduralTexture, {
+            format: "rgb",
+            mips: false,
+            outputTexture: compressedTexture
+          })
+
+          // Create bind group for rendering with the compressed texture
+          const renderBindGroup = device.createBindGroup({
+            layout: renderBindGroupLayout,
+            entries: [
+              {
+                binding: 0,
+                resource: { buffer: renderUniformBuffer }
+              },
+              {
+                binding: 1,
+                resource: compressedTexture.createView()
+              },
+              {
+                binding: 2,
+                resource: sampler
+              }
+            ]
+          })
+
+          // Render the compressed texture
+          const renderEncoder = device.createCommandEncoder()
+          const renderPass = renderEncoder.beginRenderPass({
+            colorAttachments: [
+              {
+                view: context.getCurrentTexture().createView(),
+                clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
+                loadOp: "clear",
+                storeOp: "store"
+              }
+            ]
+          })
+
+          renderPass.setPipeline(renderPipeline)
+          renderPass.setBindGroup(0, renderBindGroup)
+          renderPass.setVertexBuffer(0, vertexBuffer)
+          renderPass.draw(4, 1, 0, 0)
+          renderPass.end()
+
+          device.queue.submit([renderEncoder.finish()])
+
+          requestAnimationFrame(render)
+        }
+
+        render()
+      }
+
+      init().catch(error => {
+        console.error("Error initializing WebGPU:", error)
+      })
+    </script>
+  </body>
+</html>
