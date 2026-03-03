@@ -673,6 +673,7 @@ export class SparkGL {
     const bw = Math.ceil(width / 4)
     const bh = Math.ceil(height / 4)
     const dstBufferSize = blockSize * bw * bh
+    let byteLength = dstBufferSize
 
     gl.bufferData(gl.PIXEL_PACK_BUFFER, dstBufferSize, gl.STREAM_COPY)
 
@@ -697,6 +698,7 @@ export class SparkGL {
       const mipBw = Math.ceil(mipWidth / 4)
       const mipBh = Math.ceil(mipHeight / 4)
       const mipSize = blockSize * mipBw * mipBh
+      byteLength += mipSize
 
       // Bind input texture at current mip level
       gl.bindTexture(gl.TEXTURE_2D, encodeSrcTexture)
@@ -758,7 +760,8 @@ export class SparkGL {
       sparkFormat: format,
       sparkFormatName: SparkFormatName[format],
       srgb,
-      mipmapCount
+      mipmapCount,
+      byteLength
     }
 
     return textureObject

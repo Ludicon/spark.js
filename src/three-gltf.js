@@ -183,6 +183,10 @@ class SparkLoader extends THREE.TextureLoader {
         // Handle both WebGPU (GPUTexture) and WebGL (object with .texture property)
         const gpuTexture = textureObject.texture !== undefined ? textureObject.texture : textureObject
         const texture = new THREE.ExternalTexture(gpuTexture)
+        if (textureObject.texture !== undefined) {
+          texture.format = textureObject.format
+          texture.byteLength = textureObject.byteLength
+        }
         if (this.format == "rg" && "NormalRGPacking" in THREE) {
           // This is not understood by stock three.js
           // texture.userData.unpackNormal = THREE.NormalRGPacking
