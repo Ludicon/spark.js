@@ -54,11 +54,10 @@ const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true })
 const spark = await SparkGL.create(gl)
 
 // Load and encode an image into a WebGL texture
-const texture = await spark.encodeTexture("image.avif")
+const texture = await spark.encodeTexture("image.avif").texture
 ```
 
-The main entry point is `spark.encodeTexture()`, which loads an image and transcodes it into a compressed WebGL texture object using the selected format and options. 
-
+The main difference is the use of the `SparkGL` class instead of `Spark`. The API of the `spark` object is the same, but `spark.encodeTexture()` returns an object with a `texture` property with resulting WebGL texture handle.
 
 ## Development
 
@@ -72,7 +71,6 @@ npm run build
 # Development mode with watch
 npm run watch
 ```
-
 
 ## Examples
 
@@ -97,6 +95,8 @@ This will open `http://localhost:5174/examples/index.thml` where you can browse 
 
 
 ## Documentation
+
+For full documentation, see the [API reference](API.md).
 
 ### `encodeTexture(source, options)`
 
