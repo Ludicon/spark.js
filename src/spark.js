@@ -939,7 +939,7 @@ class Spark {
     })
   }
 
-  async #loadPipeline(format) {
+  #loadPipeline(format) {
     if (this.#pipelines[format]) {
       return this.#pipelines[format]
     }
