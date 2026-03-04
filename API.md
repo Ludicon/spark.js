@@ -293,11 +293,11 @@ await spark.encodeTexture(image, { format: "auto" })  // Analyzes image
 Precompile encoders for faster first-time encoding:
 
 ```js
-// WebGPU - preload all formats
+// preload codecs for all supported formats
 const spark = await Spark.create(device, { preload: true })
 
-// WebGL2 - preload specific formats
-const spark = SparkGL.create(gl, { preload: ["bc7", "astc", "etc2"] })
+// preload codecs for specific formats
+const spark = SparkGL.create(gl, { preload: ["rgb", "rg", "r"] })
 ```
 
 ### Resource Caching
