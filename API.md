@@ -307,12 +307,9 @@ Enable resource caching for batch encoding:
 ```js
 const spark = await Spark.create(device, { cacheTempResources: true })
 
-// Encode many images efficiently
-for (const url of imageUrls) {
-  const texture = await spark.encodeTexture(url, options)
-  textures.push(texture)
-}
-
+const textures = await Promise.all(
+  imageUrls.map(url => spark.encodeTexture(url, options))
+)
 // Free cached resources
 spark.freeTempResources()
 ```
