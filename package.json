@@ -5,15 +5,22 @@
   "main": "dist/spark.esm.js",
   "module": "dist/spark.esm.js",
   "type": "module",
+  "types": "src/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/spark.esm.js"
+      "import": "./dist/spark.esm.js",
+      "types": "./src/index.d.ts"
     },
-    "./three-gltf": "./src/three-gltf.js"
+    "./three-gltf": {
+      "import": "./src/three-gltf.js",
+      "types": "./src/three-gltf.d.ts"
+    }
   },
   "files": [
     "dist",
     "src/three-gltf.js",
+    "src/three-gltf.d.ts",
+    "src/index.d.ts",
     "README.md",
     "LICENSE"
   ],
