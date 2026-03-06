@@ -35,6 +35,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.{js,jsx}\"",
     "validate-shaders": "for shader in src/shaders/*.wgsl; do echo \"Validating $shader...\"; tint \"$shader\" --validate > /dev/null || exit 1; done && echo \"All shaders validated successfully!\"",
+    "analyze-bundle": "node scripts/analyze-bundle-size.js",
     "prepublishOnly": "npm run validate-shaders && npm run build",
     "clean": "rimraf dist"
   },
