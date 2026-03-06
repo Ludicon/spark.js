@@ -4,20 +4,7 @@ import basicSsl from "@vitejs/plugin-basic-ssl"
 import summary from "rollup-plugin-summary"
 
 export default defineConfig({
-  plugins: [
-    basicSsl(),
-    {
-      name: "glsl-loader",
-      transform(code, id) {
-        if (id.endsWith(".glsl")) {
-          return {
-            code: `export default ${JSON.stringify(code)}`,
-            map: null
-          }
-        }
-      }
-    }
-  ],
+  plugins: [basicSsl()],
   resolve: {
     alias: {
       "@ludicon/spark.js/three-gltf": resolve(__dirname, "src/three-gltf.js"),

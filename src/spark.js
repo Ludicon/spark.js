@@ -1,4 +1,4 @@
-import shaders from "./shaders"
+import shaders from "./shaders/wgsl-shaders.js"
 import { assert, loadImage, getSafariVersion, getFirefoxVersion } from "./utils.js"
 
 const SparkFormat = {
