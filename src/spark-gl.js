@@ -628,7 +628,7 @@ export class SparkGL {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
-      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, width, height)
+      gl.texStorage2D(gl.TEXTURE_2D, generateMipmaps ? mipmapCount : 1, gl.RGBA8, width, height)
 
       // Create temporary FBO for flipping
       const flipFbo = gl.createFramebuffer()
