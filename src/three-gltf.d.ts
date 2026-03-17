@@ -1,7 +1,7 @@
 // Type definitions for @ludicon/spark.js/three-gltf
 // Project: https://github.com/ludicon/spark.js
 
-import type { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import type { GLTFLoader, GLTFLoaderPlugin, GLTFParser } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { Spark, SparkGL, SparkEncodeOptions } from '@ludicon/spark.js'
 
 /**
@@ -59,4 +59,35 @@ export interface SparkGLTFOptions extends Omit<SparkEncodeOptions, 'format'> {
  * });
  * ```
  */
+/**
+ * GLTF loader plugin that compresses textures using Spark.
+ * Analyzes material usage to determine optimal compression formats for each texture.
+ */
+export class GLTFSparkPlugin implements GLTFLoaderPlugin {
+  name: string
+  parser: GLTFParser
+  constructor(name: string, parser: GLTFParser, spark: Spark | SparkGL, options?: SparkGLTFOptions)
+  loadTexture(textureIndex: number): Promise<import('three').Texture> | null
+}
+
+/**
+ * Creates an array of GLTF plugin callbacks for use with loaders that accept
+ * a plugins array (e.g. TilesRenderer).
+ *
+ * @param spark - A Spark or SparkGL instance to use for texture compression
+ * @param options - Optional encoding options to apply to all textures
+ * @returns An array of plugin callbacks that can be passed to a GLTF loader's plugins option
+ *
+ * @example
+ * ```typescript
+ * import { createSparkPlugins } from '@ludicon/spark.js/three-gltf';
+ *
+ * const tiles = new TilesRenderer(url);
+ * tiles.manager.addHandler(/\.gltf$/, {
+ *   plugins: createSparkPlugins(spark, { mips: true })
+ * });
+ * ```
+ */
+export function createSparkPlugins(spark: Spark | SparkGL, options?: SparkGLTFOptions): Array<(parser: GLTFParser) => GLTFLoaderPlugin>
+
 export function registerSparkLoader(loader: GLTFLoader, spark: Spark | SparkGL, options?: SparkGLTFOptions): void
