@@ -10,7 +10,7 @@ const Channel = {
   RGBA: 15 // 1111
 }
 
-class GLTFSparkPlugin {
+export class GLTFSparkPlugin {
   constructor(name, parser, spark, options) {
     this.name = name
     this.parser = parser
@@ -216,19 +216,26 @@ class SparkLoader extends THREE.TextureLoader {
   }
 }
 
-export function registerSparkLoader(loader, spark, options = {}) {
-  // Remove existing webp and avif plugins:
-  for (let i = 0; i < loader.pluginCallbacks.length; i++) {
-    const plugin = loader.pluginCallbacks[i](loader)
+export function createSparkPlugins(spark, options = {}) {
+  const pluginCache = new WeakMap()
 
-    if (plugin.name == "EXT_texture_webp" || plugin.name == "EXT_texture_avif") {
-      loader.unregister(loader.pluginCallbacks[i])
-      i--
+  function getOrCreatePlugin(parser) {
+    let plugin = pluginCache.get(parser)
+    if (!plugin) {
+      plugin = new GLTFSparkPlugin("spark", parser, spark, options)
+      pluginCache.set(parser, plugin)
     }
+    return plugin
   }
 
-  // Install plugin for standard textures, and textures using webp and avif extensions.
-  loader.register(parser => new GLTFSparkPlugin("spark", parser, spark, options))
-  loader.register(parser => new GLTFSparkPlugin("EXT_texture_webp", parser, spark, options))
-  loader.register(parser => new GLTFSparkPlugin("EXT_texture_avif", parser, spark, options))
+  return ["spark", "EXT_texture_webp", "EXT_texture_avif"].map(name => parser => {
+    const plugin = getOrCreatePlugin(parser)
+    return { name, loadTexture: idx => plugin.loadTexture(idx) }
+  })
+}
+
+export function registerSparkLoader(loader, spark, options = {}) {
+  for (const callback of createSparkPlugins(spark, options)) {
+    loader.register(callback)
+  }
 }

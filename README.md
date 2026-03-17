@@ -179,6 +179,17 @@ registerSparkLoader(loader, spark)
 
 After registration, the loader will automatically encode textures with Spark whenever applicable.
 
+To use the Spark plugins with the three.js 3DTilesRenderer, you can pass them to the renderer's `GLTFExtensionsPlugin` as follows:
+
+```js
+import { createSparkPlugins } from "@ludicon/spark.js/three-gltf";
+
+tiles = new TilesRenderer();
+tiles.registerPlugin( new GLTFExtensionsPlugin( {
+	plugins: createSparkPlugins( spark, { generateMipmaps: false } )
+} ) );
+```
+
 
 ## License
 
