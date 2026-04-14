@@ -473,8 +473,9 @@ class Spark {
   /**
    * Load an image and encode it to a compressed GPU texture.
    *
-   * @param {string | HTMLImageElement | ImageBitmap | GPUTexture} source
-   *        The image to encode. Can be a GPUTexture, URL, DOM image or ImageBitmap.
+   * @param {string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | GPUTexture} source
+   *        The image to encode. Can be a GPUTexture, URL, DOM image, ImageBitmap,
+   *        HTMLCanvasElement, or OffscreenCanvas.
    *
    * @param {Object} [options] - Optional configuration for encoding.
    *
@@ -517,8 +518,15 @@ class Spark {
   async encodeTexture(source, options = {}) {
     assert(this.#device, "Spark is not initialized")
 
-    // @@ TODO: Add support for canvas elements, blobs and ArrayBuffers.
-    const image = source instanceof Image || source instanceof ImageBitmap || source instanceof GPUTexture ? source : await loadImage(source)
+    // @@ TODO: Add support for blobs and ArrayBuffers.
+    const image =
+      source instanceof Image ||
+      source instanceof ImageBitmap ||
+      source instanceof HTMLCanvasElement ||
+      (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas) ||
+      source instanceof GPUTexture
+        ? source
+        : await loadImage(source)
     this.#log("Loaded image", image)
 
     const format = await this.#getBestMatchingFormat(options, image)

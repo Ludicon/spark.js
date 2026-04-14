@@ -1,0 +1,179 @@
+<!doctype html>
+<html>
+  <!-- prettier-ignore -->
+  <head>
+    <title>spark.js - Canvas source example (WebGL)</title>
+    <style>
+      body { margin: 0; font-family: sans-serif; }
+      canvas { display: block; }
+      #error {
+        position: absolute; top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 2em; max-width: 600px; text-align: center;
+        background: rgba(255,255,255,0.95); border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      }
+    </style>
+  </head>
+
+  <body>
+    <canvas id="glCanvas"></canvas>
+    <script type="module">
+      import { SparkGL } from "@ludicon/spark.js"
+
+      function showError(message) {
+        const el = document.createElement("div")
+        el.id = "error"
+        el.innerHTML = `<h1>Error</h1><p>${message}</p>`
+        document.body.appendChild(el)
+      }
+
+      // Draw a procedural texture into an offscreen 2D canvas.
+      function createSourceCanvas(size = 512) {
+        const canvas = document.createElement("canvas")
+        canvas.width = size
+        canvas.height = size
+        const ctx = canvas.getContext("2d")
+
+        const gradient = ctx.createLinearGradient(0, 0, size, size)
+        gradient.addColorStop(0.0, "#ff3366")
+        gradient.addColorStop(0.5, "#ffaa22")
+        gradient.addColorStop(1.0, "#3366ff")
+        ctx.fillStyle = gradient
+        ctx.fillRect(0, 0, size, size)
+
+        ctx.strokeStyle = "rgba(255,255,255,0.6)"
+        ctx.lineWidth = 2
+        for (let i = 0; i < 12; i++) {
+          ctx.beginPath()
+          ctx.arc(size / 2, size / 2, 20 + i * 18, 0, Math.PI * 2)
+          ctx.stroke()
+        }
+
+        ctx.fillStyle = "white"
+        ctx.font = "bold 64px sans-serif"
+        ctx.textAlign = "center"
+        ctx.textBaseline = "middle"
+        ctx.fillText("spark.js", size / 2, size / 2)
+
+        return canvas
+      }
+
+      async function init() {
+        const canvas = document.getElementById("glCanvas")
+        const gl = canvas.getContext("webgl2", { antialias: false, depth: false, stencil: false })
+        if (!gl) { showError("WebGL2 is not supported."); return }
+
+        canvas.width = window.innerWidth
+        canvas.height = window.innerHeight
+
+        const spark = SparkGL.create(gl, { preload: ["rgb"], verbose: true })
+        if (spark.getSupportedFormats().length === 0) {
+          showError("No compressed texture formats supported on this device.")
+          return
+        }
+
+        // Use an HTMLCanvasElement as the encodeTexture source.
+        const source = createSourceCanvas(512)
+        let compressedTexture
+        try {
+          compressedTexture = await spark.encodeTexture(source, { srgb: true })
+        } catch (error) {
+          showError(`Failed to compress texture: ${error.message}`)
+          console.error(error)
+          return
+        }
+
+        const vertexShaderSource = `#version 300 es
+          in vec2 position;
+          in vec2 texCoord;
+          out vec2 vTexCoord;
+          uniform vec2 uCanvasSize;
+          uniform vec2 uTextureSize;
+          void main() {
+            vTexCoord = vec2(texCoord.x, 1.0 - texCoord.y);
+            float aspect = (uTextureSize.y * uCanvasSize.x) / (uCanvasSize.y * uTextureSize.x);
+            vec2 scale = vec2(min(1.0, 1.0 / aspect), min(1.0, aspect));
+            gl_Position = vec4(position * scale, 0.0, 1.0);
+          }`
+        const fragmentShaderSource = `#version 300 es
+          precision mediump float;
+          in vec2 vTexCoord;
+          out vec4 fragColor;
+          uniform sampler2D uTexture;
+          void main() { fragColor = texture(uTexture, vTexCoord); }`
+
+        function compileShader(type, src) {
+          const s = gl.createShader(type)
+          gl.shaderSource(s, src)
+          gl.compileShader(s)
+          if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(s))
+            return null
+          }
+          return s
+        }
+
+        const program = gl.createProgram()
+        gl.attachShader(program, compileShader(gl.VERTEX_SHADER, vertexShaderSource))
+        gl.attachShader(program, compileShader(gl.FRAGMENT_SHADER, fragmentShaderSource))
+        gl.linkProgram(program)
+
+        // prettier-ignore
+        const positions = new Float32Array([
+          -1, -1, 0, 0,
+           1, -1, 1, 0,
+          -1,  1, 0, 1,
+           1,  1, 1, 1
+        ])
+        const vertexBuffer = gl.createBuffer()
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer)
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW)
+
+        const positionLoc = gl.getAttribLocation(program, "position")
+        const texCoordLoc = gl.getAttribLocation(program, "texCoord")
+        const canvasSizeLoc = gl.getUniformLocation(program, "uCanvasSize")
+        const textureSizeLoc = gl.getUniformLocation(program, "uTextureSize")
+        const textureLoc = gl.getUniformLocation(program, "uTexture")
+
+        function render() {
+          gl.viewport(0, 0, canvas.width, canvas.height)
+          gl.clearColor(0.1, 0.1, 0.1, 1.0)
+          gl.clear(gl.COLOR_BUFFER_BIT)
+          gl.useProgram(program)
+
+          gl.activeTexture(gl.TEXTURE0)
+          gl.bindTexture(gl.TEXTURE_2D, compressedTexture.texture)
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+          gl.uniform1i(textureLoc, 0)
+          gl.uniform2f(canvasSizeLoc, canvas.width, canvas.height)
+          gl.uniform2f(textureSizeLoc, compressedTexture.width, compressedTexture.height)
+
+          gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer)
+          gl.enableVertexAttribArray(positionLoc)
+          gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 16, 0)
+          gl.enableVertexAttribArray(texCoordLoc)
+          gl.vertexAttribPointer(texCoordLoc, 2, gl.FLOAT, false, 16, 8)
+
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+        }
+
+        function resize() {
+          canvas.width = window.innerWidth
+          canvas.height = window.innerHeight
+          render()
+        }
+        window.addEventListener("resize", resize)
+        render()
+      }
+
+      init().catch(err => {
+        console.error(err)
+        showError(`Initialization failed: ${err.message}`)
+      })
+    </script>
+  </body>
+</html>
