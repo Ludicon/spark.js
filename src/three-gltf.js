@@ -181,9 +181,19 @@ class SparkLoader extends THREE.TextureLoader {
       .encodeTexture(url, { format, srgb, mips, normal, preferLowQuality: this.options.preferLowQuality })
       .then(textureObject => {
         // Handle both WebGPU (GPUTexture) and WebGL (object with .texture property)
-        const gpuTexture = textureObject.texture !== undefined ? textureObject.texture : textureObject
+        const isWebGL = textureObject.texture !== undefined
+        const gpuTexture = isWebGL ? textureObject.texture : textureObject
         const texture = new THREE.ExternalTexture(gpuTexture)
-        if (textureObject.texture !== undefined) {
+
+        // ExternalTexture does not own the underlying resource, so release it when three disposes the wrapper.
+        if (isWebGL) {
+          const gl = this.spark.gl
+          texture.addEventListener("dispose", () => gl.deleteTexture(gpuTexture))
+        } else {
+          texture.addEventListener("dispose", () => gpuTexture.destroy())
+        }
+
+        if (isWebGL) {
           texture.format = textureObject.format
           texture.userData.byteLength = textureObject.byteLength
         }
