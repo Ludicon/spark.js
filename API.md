@@ -118,11 +118,13 @@ Loads an image and encodes it to a compressed GPU texture.
 
 **Parameters:**
 
-- **`source`** (`string | HTMLImageElement | ImageBitmap | GPUTexture | WebGLTexture`)  
+- **`source`** (`string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | GPUTexture | WebGLTexture`)  
   The image to encode. Can be:
   - URL string (loads image automatically)
   - DOM `<img>` element
   - `ImageBitmap` object
+  - `HTMLCanvasElement`
+  - `OffscreenCanvas`
   - `GPUTexture` (WebGPU only)
   - `WebGLTexture` (WebGL only)
 

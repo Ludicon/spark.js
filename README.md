@@ -104,8 +104,8 @@ Load an image and encode it to a compressed GPU texture.
 
 #### Parameters
 
-- **`source`** (`string | HTMLImageElement | ImageBitmap | GPUtexture`)  
-  The image to encode. Can be a GPUTexture, URL, DOM image or ImageBitmap.
+- **`source`** (`string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | GPUTexture`)  
+  The image to encode. Can be a URL, DOM image, ImageBitmap, HTMLCanvasElement, OffscreenCanvas, or GPUTexture.
 
 - **`options`** *(optional object)*
   Configuration options for encoding:
