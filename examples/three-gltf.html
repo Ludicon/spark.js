@@ -18,8 +18,10 @@
       import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
       import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
 
-      import { Spark } from "@ludicon/spark.js"
+      import { Spark, setUseImageDecoder } from "@ludicon/spark.js"
       import { registerSparkLoader } from "@ludicon/spark.js/three-gltf"
+
+      setUseImageDecoder(true)
 
       const errorHTML = `
       <div style="color: #FFF; padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
