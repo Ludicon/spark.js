@@ -266,6 +266,11 @@ export class SparkGL {
   static create(gl: WebGLRenderingContext | WebGL2RenderingContext, options?: SparkGLCreateOptions): SparkGL
 
   /**
+   * The underlying WebGL2 context.
+   */
+  readonly gl: WebGL2RenderingContext
+
+  /**
    * Destroys the SparkGL instance and all associated GPU resources.
    */
   dispose(): void

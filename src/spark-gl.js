@@ -326,6 +326,11 @@ export class SparkGL {
       this.#preloadShaders(options.preload)
     }
   }
+
+  get gl() {
+    return this.#gl
+  }
+
   dispose() {
     const gl = this.#gl
 

@@ -15,6 +15,7 @@
     <script type="module">
       import * as THREE from "three"
       import { SparkGL } from "../src/spark-gl.js"
+      import { SparkThreeExternalTexture } from "@ludicon/spark.js/three"
 
       const errorHTML = `
       <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
@@ -47,9 +48,12 @@
         generateMipmaps: true
       })
 
-      // Wrap the WebGL texture for three.js using ExternalTexture
-      const externalTex = new THREE.ExternalTexture(textureObject.texture)
-      //externalTex.image = { width: textureObject.width, height: textureObject.height }
+      // Wrap the WebGL texture for three.js. SparkThreeExternalTexture
+      // refcounts the shared resource and deletes the GL texture via the
+      // provided release callback once the final wrapper is disposed (the
+      // three.js WebGL backend does not manage ExternalTexture resources).
+      const release = tex => gl.deleteTexture(tex)
+      const externalTex = new SparkThreeExternalTexture(textureObject.texture, release)
 
       // Basic unlit material using the external texture
       const material = new THREE.MeshBasicMaterial({ map: externalTex })

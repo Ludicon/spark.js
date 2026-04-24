@@ -1,4 +1,5 @@
 import * as THREE from "three"
+import { SparkThreeExternalTexture } from "./three.js"
 
 const Channel = {
   R: 1, // 0001
@@ -181,9 +182,14 @@ class SparkLoader extends THREE.TextureLoader {
       .encodeTexture(url, { format, srgb, mips, normal, preferLowQuality: this.options.preferLowQuality })
       .then(textureObject => {
         // Handle both WebGPU (GPUTexture) and WebGL (object with .texture property)
-        const gpuTexture = textureObject.texture !== undefined ? textureObject.texture : textureObject
-        const texture = new THREE.ExternalTexture(gpuTexture)
-        if (textureObject.texture !== undefined) {
+        const isWebGL = textureObject.texture !== undefined
+        const gpuTexture = isWebGL ? textureObject.texture : textureObject
+
+        const gl = this.spark.gl
+        const onRelease = isWebGL ? tex => gl.deleteTexture(tex) : tex => tex.destroy()
+        const texture = new SparkThreeExternalTexture(gpuTexture, onRelease)
+
+        if (isWebGL) {
           texture.format = textureObject.format
           texture.userData.byteLength = textureObject.byteLength
         }
