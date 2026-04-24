@@ -1,4 +1,5 @@
 import * as THREE from "three"
+import { SparkThreeExternalTexture } from "./three.js"
 
 const Channel = {
   R: 1, // 0001
@@ -183,15 +184,10 @@ class SparkLoader extends THREE.TextureLoader {
         // Handle both WebGPU (GPUTexture) and WebGL (object with .texture property)
         const isWebGL = textureObject.texture !== undefined
         const gpuTexture = isWebGL ? textureObject.texture : textureObject
-        const texture = new THREE.ExternalTexture(gpuTexture)
 
-        // ExternalTexture does not own the underlying resource, so release it when three disposes the wrapper.
-        if (isWebGL) {
-          const gl = this.spark.gl
-          texture.addEventListener("dispose", () => gl.deleteTexture(gpuTexture))
-        } else {
-          texture.addEventListener("dispose", () => gpuTexture.destroy())
-        }
+        const gl = this.spark.gl
+        const onRelease = isWebGL ? tex => gl.deleteTexture(tex) : tex => tex.destroy()
+        const texture = new SparkThreeExternalTexture(gpuTexture, onRelease)
 
         if (isWebGL) {
           texture.format = textureObject.format
