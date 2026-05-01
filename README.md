@@ -104,8 +104,8 @@ Load an image and encode it to a compressed GPU texture.
 
 #### Parameters
 
-- **`source`** (`string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | GPUTexture`)  
-  The image to encode. Can be a URL, DOM image, ImageBitmap, HTMLCanvasElement, OffscreenCanvas, or GPUTexture.
+- **`source`** (`string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | GPUTexture | WebGLTexture`)  
+  The image to encode.
 
 - **`options`** *(optional object)*
   Configuration options for encoding:
@@ -144,8 +144,15 @@ Load an image and encode it to a compressed GPU texture.
 
 #### Returns
 
-- `Promise<GPUTexture>` 
-  A promise resolving to the encoded WebGPU texture.
+- **Spark (WebGPU)**: `Promise<GPUTexture>` - A promise resolving to the encoded WebGPU texture.
+- **SparkGL (WebGL2)**: `Promise<Object>` A promise resolving to an object with properties:
+  - `texture` (`WebGLTexture`) - The compressed WebGL texture
+  - `format` (`number`) - WebGL internal format constant
+  - `sparkFormat` (`string`) - Spark format name
+  - `width` (`number`) - Texture width
+  - `height` (`number`) - Texture height
+  - `mipLevels` (`number`) - Number of mipmap levels
+  - `byteLength` (`number`) - Size of the texture data in bytes
 
 
 ## Integration with three.js
