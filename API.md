@@ -169,12 +169,10 @@ Loads an image and encodes it to a compressed GPU texture.
   - **`flipY`** (`boolean`)
     Whether to vertically flip the image before encoding. Default: `false`.
 
-
-
 **Returns:**
 
-- **Spark (WebGPU)**: `Promise<GPUTexture>` - Compressed GPU texture
-- **SparkGL (WebGL2)**: `Promise<Object>` with properties:
+- **Spark (WebGPU)**: `Promise<GPUTexture>` - A promise resolving to the encoded WebGPU texture.
+- **SparkGL (WebGL2)**: `Promise<Object>` - A promise resolving to an object with properties:
   - `texture` (`WebGLTexture`) - The compressed WebGL texture
   - `format` (`number`) - WebGL internal format constant
   - `sparkFormat` (`string`) - Spark format name

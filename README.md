@@ -145,14 +145,7 @@ Load an image and encode it to a compressed GPU texture.
 #### Returns
 
 - **Spark (WebGPU)**: `Promise<GPUTexture>` - A promise resolving to the encoded WebGPU texture.
-- **SparkGL (WebGL2)**: `Promise<Object>` A promise resolving to an object with properties:
-  - `texture` (`WebGLTexture`) - The compressed WebGL texture
-  - `format` (`number`) - WebGL internal format constant
-  - `sparkFormat` (`string`) - Spark format name
-  - `width` (`number`) - Texture width
-  - `height` (`number`) - Texture height
-  - `mipLevels` (`number`) - Number of mipmap levels
-  - `byteLength` (`number`) - Size of the texture data in bytes
+- **SparkGL (WebGL2)**: `Promise<Object>` - A promise resolving to an object containing the compressed WebGL texture.
 
 
 ## Integration with three.js
