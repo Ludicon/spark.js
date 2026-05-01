@@ -52,6 +52,8 @@ export default defineConfig({
         mipmaps: resolve(__dirname, "examples/mipmaps.html"),
         "mipmaps-gl": resolve(__dirname, "examples/mipmaps-gl.html"),
         svg: resolve(__dirname, "examples/svg.html"),
+        canvas: resolve(__dirname, "examples/canvas.html"),
+        "canvas-gl": resolve(__dirname, "examples/canvas-gl.html"),
         video: resolve(__dirname, "examples/video.html"),
         "video-gl": resolve(__dirname, "examples/video-gl.html"),
         realtime: resolve(__dirname, "examples/realtime.html"),
