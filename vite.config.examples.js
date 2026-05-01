@@ -60,7 +60,8 @@ export default defineConfig({
         "three-basic": resolve(__dirname, "examples/three-basic.html"),
         "three-basic-gl": resolve(__dirname, "examples/three-basic-gl.html"),
         "three-gltf": resolve(__dirname, "examples/three-gltf.html"),
-        "three-gltf-gl": resolve(__dirname, "examples/three-gltf-gl.html")
+        "three-gltf-gl": resolve(__dirname, "examples/three-gltf-gl.html"),
+        "three-3d-tiles": resolve(__dirname, "examples/three-3d-tiles.html")
       }
     },
     target: "es2022",
