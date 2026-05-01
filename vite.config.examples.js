@@ -52,11 +52,16 @@ export default defineConfig({
         mipmaps: resolve(__dirname, "examples/mipmaps.html"),
         "mipmaps-gl": resolve(__dirname, "examples/mipmaps-gl.html"),
         svg: resolve(__dirname, "examples/svg.html"),
+        canvas: resolve(__dirname, "examples/canvas.html"),
+        "canvas-gl": resolve(__dirname, "examples/canvas-gl.html"),
+        video: resolve(__dirname, "examples/video.html"),
+        "video-gl": resolve(__dirname, "examples/video-gl.html"),
         realtime: resolve(__dirname, "examples/realtime.html"),
         "three-basic": resolve(__dirname, "examples/three-basic.html"),
         "three-basic-gl": resolve(__dirname, "examples/three-basic-gl.html"),
         "three-gltf": resolve(__dirname, "examples/three-gltf.html"),
-        "three-gltf-gl": resolve(__dirname, "examples/three-gltf-gl.html")
+        "three-gltf-gl": resolve(__dirname, "examples/three-gltf-gl.html"),
+        "three-3d-tiles": resolve(__dirname, "examples/three-3d-tiles.html")
       }
     },
     target: "es2022",

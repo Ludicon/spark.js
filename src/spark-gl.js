@@ -501,8 +501,8 @@ export class SparkGL {
     // Diagnose image type
     this.#log(`Image type: ${image.constructor.name}`)
 
-    const width = image.width || image.videoWidth
-    const height = image.height || image.videoHeight
+    const width = image.displayWidth ?? image.width ?? image.videoWidth
+    const height = image.displayHeight ?? image.height ?? image.videoHeight
     assert(width && height)
 
     // Choose format. Default to "rgb" if no format specified
@@ -690,10 +690,21 @@ export class SparkGL {
       this.#log(`Generated ${mipmapCount} mipmap levels`)
     }
 
-    // Create output compressed texture
-    const compressedTexture = gl.createTexture()
+    // Create or reuse output compressed texture. The caller can pass a previous
+    // encodeTexture() result object as options.outputTexture; it is reused only when
+    // dimensions, format, and mipmap count match.
+    const reuseOutput =
+      options.outputTexture &&
+      options.outputTexture.width === width &&
+      options.outputTexture.height === height &&
+      options.outputTexture.mipmapCount === mipmapCount &&
+      options.outputTexture.format === glFormat
+
+    const compressedTexture = reuseOutput ? options.outputTexture.texture : gl.createTexture()
     gl.bindTexture(gl.TEXTURE_2D, compressedTexture)
-    gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, glFormat, width, height)
+    if (!reuseOutput) {
+      gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, glFormat, width, height)
+    }
 
     // Set texture filtering parameters
     if (generateMipmaps) {
@@ -863,8 +874,7 @@ export class SparkGL {
       width,
       height,
       format: glFormat,
-      sparkFormat: format,
-      sparkFormatName: SparkFormatName[format],
+      sparkFormat: SparkFormatName[format],
       srgb,
       mipmapCount,
       byteLength
