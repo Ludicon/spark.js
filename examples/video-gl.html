@@ -176,19 +176,18 @@
 
         // Setup rendering
         async function render() {
-          // Capture the current playback frame as a VideoFrame and re-encode it.
-          // cacheTempResources keeps the intermediate textures and buffers around between calls.
+          // Capture the current playback frame as a VideoFrame and re-encode it,
+          // reusing the previous output texture to avoid reallocation.
           const frame = new VideoFrame(video)
-          let prev = compressedTexture
           try {
             compressedTexture = await spark.encodeTexture(frame, {
               format: "rgb",
-              mips: false
+              mips: false,
+              outputTexture: compressedTexture
             })
           } finally {
             frame.close()
           }
-          if (prev) gl.deleteTexture(prev.texture)
 
           gl.viewport(0, 0, canvas.width, canvas.height)
           gl.clearColor(0.1, 0.1, 0.1, 1.0)

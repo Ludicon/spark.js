@@ -142,6 +142,9 @@ Load an image and encode it to a compressed GPU texture.
   - **`flipY`** (`boolean`)
     Whether to vertically flip the image before encoding. Default: `false`.
 
+  - **`outputTexture`** (`GPUTexture` for Spark, result object for SparkGL)
+    A previously-returned texture to reuse as the output, avoiding reallocation when re-encoding into the same shape repeatedly. Reused only when its width, height, mipmap count, and format match the resolved output; otherwise a fresh texture is allocated and returned. Default: `undefined`.
+
 #### Returns
 
 - **Spark (WebGPU)**: `Promise<GPUTexture>` - A promise resolving to the encoded WebGPU texture.
