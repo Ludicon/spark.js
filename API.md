@@ -118,11 +118,14 @@ Loads an image and encodes it to a compressed GPU texture.
 
 **Parameters:**
 
-- **`source`** (`string | HTMLImageElement | ImageBitmap | GPUTexture | WebGLTexture`)  
+- **`source`** (`string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | GPUTexture | WebGLTexture`)  
   The image to encode. Can be:
   - URL string (loads image automatically)
   - DOM `<img>` element
   - `ImageBitmap` object
+  - `HTMLCanvasElement`
+  - `OffscreenCanvas`
+  - `VideoFrame`
   - `GPUTexture` (WebGPU only)
   - `WebGLTexture` (WebGL only)
 
@@ -166,18 +169,20 @@ Loads an image and encodes it to a compressed GPU texture.
   - **`flipY`** (`boolean`)
     Whether to vertically flip the image before encoding. Default: `false`.
 
-
+  - **`outputTexture`** (`GPUTexture` for Spark, result object for SparkGL)
+    A previously-returned texture to reuse as the output, avoiding reallocation when re-encoding into the same shape repeatedly. Reused only when its width, height, mipmap count, and format match the resolved output; otherwise a fresh texture is allocated and returned. Useful for real-time use cases such as encoding successive video frames. Default: `undefined`.
 
 **Returns:**
 
-- **Spark (WebGPU)**: `Promise<GPUTexture>` - Compressed GPU texture
-- **SparkGL (WebGL2)**: `Promise<Object>` with properties:
+- **Spark (WebGPU)**: `Promise<GPUTexture>` - A promise resolving to the encoded WebGPU texture.
+- **SparkGL (WebGL2)**: `Promise<Object>` - A promise resolving to an object with properties:
   - `texture` (`WebGLTexture`) - The compressed WebGL texture
   - `format` (`number`) - WebGL internal format constant
-  - `sparkFormat` (`string`) - Spark format name
+  - `sparkFormat` (`string`) - Human-readable Spark format name
+  - `srgb` (`boolean`) - Whether the texture is encoded in an sRGB format
   - `width` (`number`) - Texture width
   - `height` (`number`) - Texture height
-  - `mipLevels` (`number`) - Number of mipmap levels
+  - `mipmapCount` (`number`) - Number of mipmap levels
   - `byteLength` (`number`) - Size of the texture data in bytes
 
 
