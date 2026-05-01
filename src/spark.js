@@ -206,14 +206,17 @@ function detectWebGPUFormats(device) {
 }
 
 function imageToByteArray(image) {
+  const width = image.displayWidth ?? image.width
+  const height = image.displayHeight ?? image.height
+
   const canvas = document.createElement("canvas")
-  canvas.width = image.width
-  canvas.height = image.height
+  canvas.width = width
+  canvas.height = height
 
   const ctx = canvas.getContext("2d")
   ctx.drawImage(image, 0, 0)
 
-  const imageData = ctx.getImageData(0, 0, image.width, image.height)
+  const imageData = ctx.getImageData(0, 0, width, height)
   return new Uint8Array(imageData.data.buffer)
 }
 
@@ -449,7 +452,15 @@ class Spark {
   async selectPreferredOptions(source, options = {}) {
     // Only load the image if the format has not been specified by the user.
     if (options.format == undefined || options.format == "auto") {
-      const image = source instanceof Image || source instanceof ImageBitmap || source instanceof GPUTexture ? source : await loadImage(source)
+      const image =
+        source instanceof Image ||
+        source instanceof ImageBitmap ||
+        source instanceof HTMLCanvasElement ||
+        (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas) ||
+        (typeof VideoFrame !== "undefined" && source instanceof VideoFrame) ||
+        source instanceof GPUTexture
+          ? source
+          : await loadImage(source)
 
       options.format = "auto"
       const format = await this.#getBestMatchingFormat(options, image)
@@ -473,9 +484,9 @@ class Spark {
   /**
    * Load an image and encode it to a compressed GPU texture.
    *
-   * @param {string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | GPUTexture} source
+   * @param {string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | GPUTexture} source
    *        The image to encode. Can be a GPUTexture, URL, DOM image, ImageBitmap,
-   *        HTMLCanvasElement, or OffscreenCanvas.
+   *        HTMLCanvasElement, OffscreenCanvas, or VideoFrame.
    *
    * @param {Object} [options] - Optional configuration for encoding.
    *
@@ -518,16 +529,32 @@ class Spark {
   async encodeTexture(source, options = {}) {
     assert(this.#device, "Spark is not initialized")
 
+    // Firefox's WebGPU does not yet accept VideoFrame in copyExternalImageToTexture.
+    // Convert to ImageBitmap and recurse so cleanup stays localized.
+    if (getFirefoxVersion() && typeof VideoFrame !== "undefined" && source instanceof VideoFrame) {
+      const bitmap = await createImageBitmap(source)
+      try {
+        return await this.encodeTexture(bitmap, options)
+      } finally {
+        bitmap.close()
+      }
+    }
+
     // @@ TODO: Add support for blobs and ArrayBuffers.
     const image =
       source instanceof Image ||
       source instanceof ImageBitmap ||
       source instanceof HTMLCanvasElement ||
       (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas) ||
+      (typeof VideoFrame !== "undefined" && source instanceof VideoFrame) ||
       source instanceof GPUTexture
         ? source
         : await loadImage(source)
     this.#log("Loaded image", image)
+
+    // VideoFrame uses displayWidth/displayHeight instead of width/height.
+    const srcWidth = image.displayWidth ?? image.width
+    const srcHeight = image.displayHeight ?? image.height
 
     const format = await this.#getBestMatchingFormat(options, image)
 
@@ -536,8 +563,8 @@ class Spark {
 
     // Round up the size to meet WebGPU requirements.
     // It would be great if this contstraint was optional. The only API still requiring it is D3D12.
-    const width = Math.ceil(image.width / 4) * 4
-    const height = Math.ceil(image.height / 4) * 4
+    const width = Math.ceil(srcWidth / 4) * 4
+    const height = Math.ceil(srcHeight / 4) * 4
     const blockSize = SparkBlockSize[format]
     const mipmaps = options.generateMipmaps || options.mips
 
@@ -570,7 +597,7 @@ class Spark {
       inputUsage |= GPUTextureUsage.STORAGE_BINDING
     }
 
-    const needsProcessing = options.flipY || width != image.width || height != image.height
+    const needsProcessing = options.flipY || width != srcWidth || height != srcHeight
 
     if (!needsProcessing && !(image instanceof GPUTexture)) {
       inputUsage |= GPUTextureUsage.RENDER_ATTACHMENT // This is only necessary for the copyExternalImageToTexture codepath.
@@ -624,8 +651,8 @@ class Spark {
         const needsTmpRealloc =
           !this.#cacheTempResources ||
           !this.#cachedTmpTexture ||
-          this.#cachedTmpTexture.width < image.width ||
-          this.#cachedTmpTexture.height < image.height
+          this.#cachedTmpTexture.width < srcWidth ||
+          this.#cachedTmpTexture.height < srcHeight
 
         if (this.#cacheTempResources && this.#cachedTmpTexture && !needsTmpRealloc) {
           tmpTexture = this.#cachedTmpTexture
@@ -634,7 +661,7 @@ class Spark {
             this.#cachedTmpTexture.destroy()
           }
           tmpTexture = this.#device.createTexture({
-            size: [image.width, image.height, 1],
+            size: [srcWidth, srcHeight, 1],
             mipLevelCount: 1,
             format: "rgba8unorm",
             // RENDER_ATTACHMENT usage is necessary for copyExternalImageToTexture
@@ -646,7 +673,7 @@ class Spark {
           }
         }
 
-        this.#device.queue.copyExternalImageToTexture({ source: image }, { texture: tmpTexture }, { width: image.width, height: image.height })
+        this.#device.queue.copyExternalImageToTexture({ source: image }, { texture: tmpTexture }, { width: srcWidth, height: srcHeight })
 
         this.#processInputTexture(commandEncoder, tmpTexture, inputTexture, width, height, colorMode, options.flipY)
       }

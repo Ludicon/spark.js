@@ -104,6 +104,17 @@ export interface SparkEncodeOptions {
    * @default false
    */
   flipY?: boolean
+
+  /**
+   * A previously-returned texture to reuse as the output, avoiding reallocation when
+   * re-encoding into the same shape repeatedly. Reused only when the existing texture
+   * matches the resolved width, height, mipmap count, and format; otherwise a fresh
+   * texture is allocated and returned.
+   *
+   * - For Spark: pass the `GPUTexture` returned by a prior `encodeTexture()`.
+   * - For SparkGL: pass the result object returned by a prior `encodeTexture()`.
+   */
+  outputTexture?: GPUTexture | SparkGLTextureResult
 }
 
 /**
@@ -134,11 +145,14 @@ export class Spark {
 
   /**
    * Load an image and encode it to a compressed GPU texture.
-   * @param source - The image to encode. Can be a URL string, DOM image element, ImageBitmap, HTMLCanvasElement, OffscreenCanvas, or GPUTexture
+   * @param source - The image to encode. Can be a URL string, DOM image element, ImageBitmap, HTMLCanvasElement, OffscreenCanvas, VideoFrame, or GPUTexture
    * @param options - Optional configuration for encoding
    * @returns Promise resolving to the encoded GPU texture
    */
-  encodeTexture(source: string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | GPUTexture, options?: SparkEncodeOptions): Promise<GPUTexture>
+  encodeTexture(
+    source: string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | GPUTexture,
+    options?: SparkEncodeOptions
+  ): Promise<GPUTexture>
 
   /**
    * Returns list of compression formats supported on the current device.
@@ -166,7 +180,10 @@ export class Spark {
    * @param options - Encoding options
    * @returns Recommended encoding options with an explicit encoding format
    */
-  selectPreferredOptions(source: string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | GPUTexture, options?: SparkEncodeOptions): Promise<SparkEncodeOptions>
+  selectPreferredOptions(
+    source: string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | GPUTexture,
+    options?: SparkEncodeOptions
+  ): Promise<SparkEncodeOptions>
 
   /**
    * Get elapsed time for the last encoding operation (requires useTimestampQueries option).
@@ -223,14 +240,9 @@ export interface SparkGLTextureResult {
   format: number
 
   /**
-   * Spark format name
-   */
-  sparkFormat: number
-
-  /**
    * Human-readable Spark format name
    */
-  sparkFormatName: string
+  sparkFormat: string
 
   /**
    * Texture width in pixels
@@ -245,7 +257,12 @@ export interface SparkGLTextureResult {
   /**
    * Number of mipmap levels
    */
-  mipLevels: number
+  mipmapCount: number
+
+  /**
+   * Whether the texture is encoded in an sRGB format
+   */
+  srgb: boolean
 
   /**
    * Size of the texture data in bytes
@@ -276,7 +293,10 @@ export class SparkGL {
    * @param options - Optional configuration for encoding
    * @returns Promise resolving to an object containing the encoded texture and metadata
    */
-  encodeTexture(source: string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | WebGLTexture, options?: SparkEncodeOptions): Promise<SparkGLTextureResult>
+  encodeTexture(
+    source: string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | WebGLTexture,
+    options?: SparkEncodeOptions
+  ): Promise<SparkGLTextureResult>
 
   /**
    * Returns list of compression formats supported on the current device.
