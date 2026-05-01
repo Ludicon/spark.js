@@ -698,10 +698,9 @@ export class SparkGL {
       options.outputTexture.width === width &&
       options.outputTexture.height === height &&
       options.outputTexture.mipmapCount === mipmapCount &&
-      options.outputTexture.format === glFormat &&
-      options.outputTexture.texture
+      options.outputTexture.format === glFormat
 
-    const compressedTexture = reuseOutput || gl.createTexture()
+    const compressedTexture = reuseOutput ? options.outputTexture.texture : gl.createTexture()
     gl.bindTexture(gl.TEXTURE_2D, compressedTexture)
     if (!reuseOutput) {
       gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, glFormat, width, height)
