@@ -8,9 +8,10 @@ Real-time texture compression library for the Web.
 
 It enables the use of standard image formats in WebGL and WebGPU applications transcoding them at load-time to native GPU formats like BC7, ASTC, and ETC2, using fast, high-quality GPU encoders.
 
-Try the [image viewer](https://ludicon.com/sparkjs/viewer/) or the [gltf demo](https://ludicon.com/sparkjs/gltf-demo/):
+Try the [image viewer](https://ludicon.com/sparkjs/viewer/), the [gltf demo](https://ludicon.com/sparkjs/gltf-demo/), or checkout the [examples](https://ludicon.github.io/spark.js/):
 
 [<img src="https://ludicon.com/sparkjs/viewer/og.jpg" width="49%">](https://ludicon.com/sparkjs/viewer/) [<img src="https://ludicon.com/sparkjs/gltf-demo/og.jpg" width="49%">](https://ludicon.com/sparkjs/gltf-demo/)
+[<img src="https://ludicon.com/sparkjs/tiles-demo/tiles-card.jpg" width="49%">](https://ludicon.github.io/spark.js/three-3d-tiles.html)
 
 ---
 
