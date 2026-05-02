@@ -59,66 +59,6 @@ export async function loadImageBitmap(url) {
   })
 }
 
-/*
-const MIME_FROM_EXT = {
-  avif: "image/avif",
-  webp: "image/webp",
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif"
-}
-
-function mimeTypeFromUrl(url) {
-  const ext = url.split("?")[0].split("#")[0].split(".").pop()?.toLowerCase()
-  return MIME_FROM_EXT[ext]
-}
-
-// Decode via WebCodecs ImageDecoder, then wrap the VideoFrame as an ImageBitmap
-// so callers see the same return type as loadImageBitmap.
-//
-// Motivation: on Firefox, createImageBitmap(blob) still runs image decode on the
-// main thread for several formats (AVIF in particular). ImageDecoder performs
-// decode off the main thread and returns a decoded VideoFrame; wrapping that
-// frame with createImageBitmap is effectively a handle copy, not a second decode.
-export async function loadImageDecoder(url) {
-  const res = await fetch(url, { mode: "cors" })
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
-
-  const contentType = res.headers.get("Content-Type")?.split(";")[0].trim()
-  const mimeType = contentType || mimeTypeFromUrl(url)
-
-  if (!mimeType || !(await ImageDecoder.isTypeSupported(mimeType))) {
-    // Fall back to createImageBitmap when ImageDecoder can't handle the type.
-    const blob = await res.blob()
-    return createImageBitmap(blob, {
-      imageOrientation: "none",
-      colorSpaceConversion: "none",
-      premultiplyAlpha: "none"
-    })
-  }
-
-  const decoder = new ImageDecoder({
-    data: res.body,
-    type: mimeType,
-    colorSpaceConversion: "none",
-    preferAnimation: false
-  })
-
-  try {
-    // Returns a VideoFrame; caller is responsible for calling .close() on it.
-    const { image } = await decoder.decode({ frameIndex: 0, completeFramesOnly: true })
-    return image
-  } finally {
-    decoder.close()
-  }
-}
-
-// Only use image decoder in Firefox.
-const hasImageDecoder = typeof globalThis.ImageDecoder !== "undefined"
-const useImageDecoder = hasImageDecoder && false // getFirefoxVersion()
-*/
-
 const webkitVersion = getSafariVersion()
 
 // Safari 18.2 (Tahoe) introduced support for SVG in copyExternalImageToTexture
@@ -152,9 +92,6 @@ export async function loadImage(url) {
     return convertImageElementToImageBitmap(img)
   } else if (isSvg || webkitVersion) {
     return loadImageElement(url)
-    // } else if (useImageDecoder) {
-    //   // ImageDecoder doesn't support SVG; the branches above already handle that.
-    //   return loadImageDecoder(url)
   } else {
     return loadImageBitmap(url)
   }
