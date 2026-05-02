@@ -46,15 +46,15 @@ export function loadImageElement(url) {
   })
 }
 
-export async function loadImageBitmap(url, opts = {}) {
+export async function loadImageBitmap(url) {
   const res = await fetch(url, { mode: "cors" })
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
   const blob = await res.blob()
 
   // Note: createImageBitmap doesn't support image/svg+xml
   return createImageBitmap(blob, {
-    imageOrientation: opts.flipY ? "flipY" : "none",
-    colorSpaceConversion: opts.colorSpaceConversion ?? "none",
+    imageOrientation: "none",
+    colorSpaceConversion: "none",
     premultiplyAlpha: "none"
   })
 }
@@ -77,7 +77,7 @@ async function convertImageElementToImageBitmap(img) {
   return createImageBitmap(canvas)
 }
 
-export async function loadImage(url, opts = {}) {
+export async function loadImage(url) {
   // webkit: loadImageElement is faster than createImageBitmap.
   // webkit: certain images do not load correctly with loadImageBitmap.
   // chrome: linear images load incorrectly with loadImageElement.
@@ -93,6 +93,6 @@ export async function loadImage(url, opts = {}) {
   } else if (isSvg || webkitVersion) {
     return loadImageElement(url)
   } else {
-    return loadImageBitmap(url, opts)
+    return loadImageBitmap(url)
   }
 }
