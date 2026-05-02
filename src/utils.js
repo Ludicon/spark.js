@@ -46,19 +46,20 @@ export function loadImageElement(url) {
   })
 }
 
-export async function loadImageBitmap(url, opts = {}) {
+export async function loadImageBitmap(url) {
   const res = await fetch(url, { mode: "cors" })
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
   const blob = await res.blob()
 
   // Note: createImageBitmap doesn't support image/svg+xml
   return createImageBitmap(blob, {
-    imageOrientation: opts.flipY ? "flipY" : "none",
-    colorSpaceConversion: opts.colorSpaceConversion ?? "none",
+    imageOrientation: "none",
+    colorSpaceConversion: "none",
     premultiplyAlpha: "none"
   })
 }
 
+/*
 const MIME_FROM_EXT = {
   avif: "image/avif",
   webp: "image/webp",
@@ -80,7 +81,7 @@ function mimeTypeFromUrl(url) {
 // main thread for several formats (AVIF in particular). ImageDecoder performs
 // decode off the main thread and returns a decoded VideoFrame; wrapping that
 // frame with createImageBitmap is effectively a handle copy, not a second decode.
-export async function loadImageDecoder(url, opts = {}) {
+export async function loadImageDecoder(url) {
   const res = await fetch(url, { mode: "cors" })
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
 
@@ -91,8 +92,8 @@ export async function loadImageDecoder(url, opts = {}) {
     // Fall back to createImageBitmap when ImageDecoder can't handle the type.
     const blob = await res.blob()
     return createImageBitmap(blob, {
-      imageOrientation: opts.flipY ? "flipY" : "none",
-      colorSpaceConversion: opts.colorSpaceConversion ?? "none",
+      imageOrientation: "none",
+      colorSpaceConversion: "none",
       premultiplyAlpha: "none"
     })
   }
@@ -100,34 +101,23 @@ export async function loadImageDecoder(url, opts = {}) {
   const decoder = new ImageDecoder({
     data: res.body,
     type: mimeType,
-    colorSpaceConversion: opts.colorSpaceConversion ?? "none",
+    colorSpaceConversion: "none",
     preferAnimation: false
   })
 
   try {
-    const { image: frame } = await decoder.decode({ frameIndex: 0, completeFramesOnly: true })
-    try {
-      return await createImageBitmap(frame, {
-        imageOrientation: opts.flipY ? "flipY" : "none",
-        premultiplyAlpha: "none"
-      })
-    } finally {
-      frame.close()
-    }
+    // Returns a VideoFrame; caller is responsible for calling .close() on it.
+    const { image } = await decoder.decode({ frameIndex: 0, completeFramesOnly: true })
+    return image
   } finally {
     decoder.close()
   }
 }
 
+// Only use image decoder in Firefox.
 const hasImageDecoder = typeof globalThis.ImageDecoder !== "undefined"
-
-let useImageDecoder = false
-
-// Opt in to the WebCodecs ImageDecoder path for loadImage. No-op when the API
-// is unavailable (Safari/WebKit). Intended to be called once at startup.
-export function setUseImageDecoder(enabled) {
-  useImageDecoder = !!enabled && hasImageDecoder
-}
+const useImageDecoder = hasImageDecoder && false // getFirefoxVersion()
+*/
 
 const webkitVersion = getSafariVersion()
 
@@ -147,7 +137,7 @@ async function convertImageElementToImageBitmap(img) {
   return createImageBitmap(canvas)
 }
 
-export async function loadImage(url, opts = {}) {
+export async function loadImage(url) {
   // webkit: loadImageElement is faster than createImageBitmap.
   // webkit: certain images do not load correctly with loadImageBitmap.
   // chrome: linear images load incorrectly with loadImageElement.
@@ -162,10 +152,10 @@ export async function loadImage(url, opts = {}) {
     return convertImageElementToImageBitmap(img)
   } else if (isSvg || webkitVersion) {
     return loadImageElement(url)
-  } else if (opts.useImageDecoder ?? useImageDecoder) {
-    // ImageDecoder doesn't support SVG; the branches above already handle that.
-    return loadImageDecoder(url, opts)
+    // } else if (useImageDecoder) {
+    //   // ImageDecoder doesn't support SVG; the branches above already handle that.
+    //   return loadImageDecoder(url)
   } else {
-    return loadImageBitmap(url, opts)
+    return loadImageBitmap(url)
   }
 }

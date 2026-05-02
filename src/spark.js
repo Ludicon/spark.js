@@ -452,29 +452,32 @@ class Spark {
   async selectPreferredOptions(source, options = {}) {
     // Only load the image if the format has not been specified by the user.
     if (options.format == undefined || options.format == "auto") {
-      const image =
+      const direct =
         source instanceof Image ||
         source instanceof ImageBitmap ||
         source instanceof HTMLCanvasElement ||
         (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas) ||
         (typeof VideoFrame !== "undefined" && source instanceof VideoFrame) ||
         source instanceof GPUTexture
-          ? source
-          : await loadImage(source)
+      const image = direct ? source : await loadImage(source)
 
-      options.format = "auto"
-      const format = await this.#getBestMatchingFormat(options, image)
+      try {
+        options.format = "auto"
+        const format = await this.#getBestMatchingFormat(options, image)
 
-      options.format = SparkFormatName[format]
+        options.format = SparkFormatName[format]
 
-      // Set srgb flag automatically.
-      if (image instanceof GPUTexture) {
-        if (image.format.endsWith("-srgb")) options.srgb = true
-      }
+        // Set srgb flag automatically.
+        if (image instanceof GPUTexture) {
+          if (image.format.endsWith("-srgb")) options.srgb = true
+        }
 
-      if (format == SparkFormat.EAC_RG || format == SparkFormat.BC5_RG) {
-        // Assume it's a normal map.
-        options.normal = true
+        if (format == SparkFormat.EAC_RG || format == SparkFormat.BC5_RG) {
+          // Assume it's a normal map.
+          options.normal = true
+        }
+      } finally {
+        if (!direct) image.close?.()
       }
     }
 
@@ -529,9 +532,31 @@ class Spark {
   async encodeTexture(source, options = {}) {
     assert(this.#device, "Spark is not initialized")
 
+    const isVideoFrame = typeof VideoFrame !== "undefined" && source instanceof VideoFrame
+
+    // Anything we don't recognize as a directly-usable source (URL strings, etc.) is fed
+    // through loadImage. We recurse so we own the returned image and can close it;
+    // loadImage may return a VideoFrame on Firefox.
+    const isDirectSource =
+      source instanceof Image ||
+      source instanceof ImageBitmap ||
+      source instanceof HTMLCanvasElement ||
+      (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas) ||
+      isVideoFrame ||
+      source instanceof GPUTexture
+
+    if (!isDirectSource) {
+      const loaded = await loadImage(source)
+      try {
+        return await this.encodeTexture(loaded, options)
+      } finally {
+        loaded.close?.()
+      }
+    }
+
     // Firefox's WebGPU does not yet accept VideoFrame in copyExternalImageToTexture.
     // Convert to ImageBitmap and recurse so cleanup stays localized.
-    if (getFirefoxVersion() && typeof VideoFrame !== "undefined" && source instanceof VideoFrame) {
+    if (getFirefoxVersion() && isVideoFrame) {
       const bitmap = await createImageBitmap(source)
       try {
         return await this.encodeTexture(bitmap, options)
@@ -540,16 +565,7 @@ class Spark {
       }
     }
 
-    // @@ TODO: Add support for blobs and ArrayBuffers.
-    const image =
-      source instanceof Image ||
-      source instanceof ImageBitmap ||
-      source instanceof HTMLCanvasElement ||
-      (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas) ||
-      (typeof VideoFrame !== "undefined" && source instanceof VideoFrame) ||
-      source instanceof GPUTexture
-        ? source
-        : await loadImage(source)
+    const image = source
     this.#log("Loaded image", image)
 
     // VideoFrame uses displayWidth/displayHeight instead of width/height.
@@ -649,10 +665,7 @@ class Spark {
       } else {
         // Create or reuse temporary texture using the input size
         const needsTmpRealloc =
-          !this.#cacheTempResources ||
-          !this.#cachedTmpTexture ||
-          this.#cachedTmpTexture.width < srcWidth ||
-          this.#cachedTmpTexture.height < srcHeight
+          !this.#cacheTempResources || !this.#cachedTmpTexture || this.#cachedTmpTexture.width < srcWidth || this.#cachedTmpTexture.height < srcHeight
 
         if (this.#cacheTempResources && this.#cachedTmpTexture && !needsTmpRealloc) {
           tmpTexture = this.#cachedTmpTexture

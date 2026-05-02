@@ -493,9 +493,15 @@ export class SparkGL {
   async encodeTexture(image, options = {}) {
     const gl = this.#gl
 
-    // Load image if it's a URL
+    // Resolve URLs by recursing on the loaded image so we can close it (loadImage may
+    // return a VideoFrame on Firefox).
     if (typeof image === "string") {
-      image = await loadImage(image)
+      const loaded = await loadImage(image)
+      try {
+        return await this.encodeTexture(loaded, options)
+      } finally {
+        loaded.close?.()
+      }
     }
 
     // Diagnose image type
