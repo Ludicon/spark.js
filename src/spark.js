@@ -623,7 +623,6 @@ class Spark {
       : srgb
         ? ["rgba8unorm", "rgba8unorm-srgb"]
         : ["rgba8unorm"]
-    // this.#useFragmentShader
 
     const needsProcessing = options.flipY || width != srcWidth || height != srcHeight
 
