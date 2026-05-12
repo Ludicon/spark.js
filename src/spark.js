@@ -595,16 +595,14 @@ class Spark {
     const { mipmapCount, outputSize, bufferRanges } = computeMipmapLayout(width, height, blockSize, mipmaps)
 
     // @@ Add a warning when the user requests srgb, but the selected format does not support it.
-    // @@ We could potentially use a smaller format if the compressed format has fewer channels.
     const srgb = (options.srgb || options.format?.endsWith("srgb")) && isFormatRGB(format)
 
     let colorMode = srgb ? ColorMode.sRGB : ColorMode.Linear
     if (isFormatAlpha(format)) colorMode |= ColorMode.Alpha
     if (options.normal) colorMode = ColorMode.Normal
-    // In compat mode we keep the scratch texture as rgba8unorm (so the encoder bind group
-    // doesn't apply an unwanted sRGB decode); the mipmap fragment shader applies sRGB
-    // averaging in shader instead. This bit toggles that path.
-    if ((colorMode & ColorMode.sRGB) && this.#compatibilityMode) colorMode |= ColorMode.sRGBManual
+    // In compat mode we keep the scratch texture as rgba8unorm and the mipmap fragment shader applies sRGB
+    // conversion in shader instead.
+    if (colorMode & ColorMode.sRGB && this.#compatibilityMode) colorMode |= ColorMode.sRGBManual
 
     const webgpuFormat = SparkWebGPUFormats[format] + (srgb ? "-srgb" : "")
 
@@ -613,16 +611,14 @@ class Spark {
     // an additional copy. This may still be faster than allocating a texture, but would consume more memory. Also, ideally we could use
     // a single temporary texture that is reused for all texture uploads, and resized/freed as needed.
 
-    // Allocate input texture. @@ This texture could be persistent.
-    const counter = this.#encodeCounter++
-    this.#time("create input texture #" + counter)
-
     let inputUsage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
     if (this.#useFragmentShader) {
       inputUsage |= GPUTextureUsage.RENDER_ATTACHMENT
     } else {
       inputUsage |= GPUTextureUsage.STORAGE_BINDING
     }
+
+    // @@ We could potentially use a smaller format if the compressed format has fewer channels.
     const inputFormat = options.input_bgra ? "bgra8unorm" : "rgba8unorm"
 
     // Compatibility mode forbits multi-format views, so we do not alias and rely on sRGBManual in the shader.
@@ -642,6 +638,9 @@ class Spark {
       inputUsage |= GPUTextureUsage.RENDER_ATTACHMENT // This is only necessary for the copyExternalImageToTexture codepath.
     }
 
+    const counter = this.#encodeCounter++
+    this.#time("create input texture #" + counter)
+
     const commandEncoder = this.#device.createCommandEncoder()
 
     commandEncoder.pushDebugGroup?.("spark process texture")
@@ -650,6 +649,7 @@ class Spark {
       commandEncoder.writeTimestamp(this.#querySet, 0)
     }
 
+    // Allocate input texture.
     let inputTexture
 
     if (needsProcessing || !(image instanceof GPUTexture && !mipmaps)) {
