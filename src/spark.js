@@ -1,5 +1,5 @@
 import shaders from "./shaders/wgsl-shaders.js"
-import { assert, loadImage, getSafariVersion, getFirefoxVersion } from "./utils.js"
+import { assert, loadImage, loadImageFromBlob, getSafariVersion, getFirefoxVersion } from "./utils.js"
 
 const SparkFormat = {
   ASTC_4x4_RGB: 0,
@@ -463,7 +463,7 @@ class Spark {
         (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas) ||
         (typeof VideoFrame !== "undefined" && source instanceof VideoFrame) ||
         source instanceof GPUTexture
-      const image = direct ? source : await loadImage(source)
+      const image = direct ? source : source instanceof Blob ? await loadImageFromBlob(source) : await loadImage(source)
 
       try {
         options.format = "auto"
@@ -550,7 +550,7 @@ class Spark {
       source instanceof GPUTexture
 
     if (!isDirectSource) {
-      const loaded = await loadImage(source)
+      const loaded = source instanceof Blob ? await loadImageFromBlob(source) : await loadImage(source)
       try {
         return await this.encodeTexture(loaded, options)
       } finally {
@@ -561,6 +561,10 @@ class Spark {
     // Firefox's WebGPU does not yet accept VideoFrame in copyExternalImageToTexture.
     // Convert to ImageBitmap and recurse so cleanup stays localized.
     if (getFirefoxVersion() && isVideoFrame) {
+      if (source.format == "BGRA" || source.format == "BGRX") {
+        // Choose BGRA format to avoid pixel format conversion in copyExternalImageToTexture.
+        options.input_bgra = true
+      }
       const bitmap = await createImageBitmap(source)
       try {
         return await this.encodeTexture(bitmap, options)
@@ -604,12 +608,6 @@ class Spark {
 
     const webgpuFormat = SparkWebGPUFormats[format] + (srgb ? "-srgb" : "")
 
-    // Scratch textures are always rgba8unorm so the encoder samples raw bytes-as-floats.
-    // In non-compat mode we add an rgba8unorm-srgb view-format alias so the fragment-shader
-    // path can do gamma-correct mipmap averaging via auto sRGB decode/encode. Compat mode
-    // forbids multi-format views, so we drop the alias and rely on sRGBManual in the shader.
-    const viewFormats = this.#compatibilityMode ? undefined : srgb ? ["rgba8unorm", "rgba8unorm-srgb"] : ["rgba8unorm"]
-
     // For now let's just create a texture. Ideally we would use a staging buffer, but in WebGPU it's not possible to create a bufer that
     // both the host can write to and the device can read from a compute shader, so in practice we would need two buffers and to perform
     // an additional copy. This may still be faster than allocating a texture, but would consume more memory. Also, ideally we could use
@@ -625,6 +623,18 @@ class Spark {
     } else {
       inputUsage |= GPUTextureUsage.STORAGE_BINDING
     }
+    const inputFormat = options.input_bgra ? "bgra8unorm" : "rgba8unorm"
+
+    // Compatibility mode forbits multi-format views, so we do not alias and rely on sRGBManual in the shader.
+    const inputViewFormats = this.#compatibilityMode
+      ? undefined
+      : options.input_bgra
+        ? srgb
+          ? ["bgra8unorm", "bgra8unorm-srgb"]
+          : ["bgra8unorm"]
+        : srgb
+          ? ["rgba8unorm", "rgba8unorm-srgb"]
+          : ["rgba8unorm"]
 
     const needsProcessing = options.flipY || width != srcWidth || height != srcHeight
 
@@ -649,6 +659,7 @@ class Spark {
         !this.#cachedInputTexture ||
         this.#cachedInputTexture.width < width ||
         this.#cachedInputTexture.height < height ||
+        this.#cachedInputTexture.format != inputFormat ||
         this.#cachedInputTexture.mipLevelCount < mipmapCount
 
       if (this.#cacheTempResources && this.#cachedInputTexture && !needsRealloc) {
@@ -660,9 +671,9 @@ class Spark {
         inputTexture = this.#device.createTexture({
           size: [width, height, 1],
           mipLevelCount: mipmapCount,
-          format: "rgba8unorm",
+          format: inputFormat,
           usage: inputUsage,
-          ...(viewFormats ? { viewFormats } : {})
+          ...(inputViewFormats ? { inputViewFormats } : {})
         })
         if (this.#cacheTempResources) {
           this.#cachedInputTexture = inputTexture
@@ -678,7 +689,11 @@ class Spark {
       } else {
         // Create or reuse temporary texture using the input size
         const needsTmpRealloc =
-          !this.#cacheTempResources || !this.#cachedTmpTexture || this.#cachedTmpTexture.width < srcWidth || this.#cachedTmpTexture.height < srcHeight
+          !this.#cacheTempResources ||
+          !this.#cachedTmpTexture ||
+          this.#cachedTmpTexture.width < srcWidth ||
+          this.#cachedTmpTexture.height < srcHeight ||
+          this.#cachedInputTexture.format != inputFormat
 
         if (this.#cacheTempResources && this.#cachedTmpTexture && !needsTmpRealloc) {
           tmpTexture = this.#cachedTmpTexture
@@ -689,10 +704,10 @@ class Spark {
           tmpTexture = this.#device.createTexture({
             size: [srcWidth, srcHeight, 1],
             mipLevelCount: 1,
-            format: "rgba8unorm",
+            format: inputFormat,
             // RENDER_ATTACHMENT usage is necessary for copyExternalImageToTexture
             usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-            ...(viewFormats ? { viewFormats } : {})
+            ...(inputViewFormats ? { inputViewFormats } : {})
           })
           if (this.#cacheTempResources) {
             this.#cachedTmpTexture = tmpTexture
