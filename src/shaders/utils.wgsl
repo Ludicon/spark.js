@@ -3,9 +3,14 @@ struct Params {
     alphaScale: f32,
 };
 
-const COLOR_SRGB   : u32 = 1u;
-const COLOR_ALPHA  : u32 = 2u;
-const COLOR_NORMAL : u32 = 4u;
+const COLOR_SRGB        : u32 = 1u;
+const COLOR_ALPHA       : u32 = 2u;
+const COLOR_NORMAL      : u32 = 4u;
+// In compat mode the scratch texture is plain rgba8unorm (no rgba8unorm-srgb view-format
+// alias), so the fragment-shader mipmap path can't rely on hardware sRGB decode/encode.
+// When this bit is set, mipmap_fs taps four texels, decodes each from sRGB, averages in
+// linear, and re-encodes to sRGB byte values that the encoder will consume as-is.
+const COLOR_SRGB_MANUAL : u32 = 8u;
 
 @group(0) @binding(0) var src : texture_2d<f32>;
 @group(0) @binding(1) var dst : texture_storage_2d<rgba8unorm, write>;
@@ -316,9 +321,24 @@ fn fullscreen_vs(@builtin(vertex_index) vertexIndex : u32) -> VSOutput {
 @fragment
 fn mipmap_fs(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 
-    // Instead of using level 0, we could pass the level as an argument, and reuse the same bindgroup
-    // for all mipmaps.
-    var color = textureSampleLevel(src, smp, uv, 0);
+    var color : vec4<f32>;
+    if ((params.colorMode & COLOR_SRGB_MANUAL) != 0u) {
+        // Compat-mode path: the texture is rgba8unorm holding sRGB-encoded bytes, so
+        // hardware bilinear would average in non-linear space. Tap the four source
+        // texels of the 2x2 box, decode each, average in linear, re-encode.
+        let srcSizeRcp = vec2f(1.0) / vec2f(textureDimensions(src, 0));
+        let uv00 = uv - 0.5 * srcSizeRcp;
+        let uv11 = uv + 0.5 * srcSizeRcp;
+        let c00 = srgb_to_linear_vec4(textureSampleLevel(src, smp, vec2(uv00.x, uv00.y), 0));
+        let c10 = srgb_to_linear_vec4(textureSampleLevel(src, smp, vec2(uv11.x, uv00.y), 0));
+        let c01 = srgb_to_linear_vec4(textureSampleLevel(src, smp, vec2(uv00.x, uv11.y), 0));
+        let c11 = srgb_to_linear_vec4(textureSampleLevel(src, smp, vec2(uv11.x, uv11.y), 0));
+        color = linear_to_srgb_vec4(0.25 * (c00 + c10 + c01 + c11));
+    } else {
+        // Instead of using level 0, we could pass the level as an argument, and reuse the same bindgroup
+        // for all mipmaps.
+        color = textureSampleLevel(src, smp, uv, 0);
+    }
 
     if (params.colorMode == COLOR_NORMAL) {
         color = normalize_vec4(color);

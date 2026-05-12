@@ -89,7 +89,10 @@ const ColorMode = {
   Linear: 0,
   sRGB: 1,
   Alpha: 2,
-  Normal: 4
+  Normal: 4,
+  // Set when the fragment-shader mipmap path must apply sRGB conversion in shader
+  // instead of relying on rgba8unorm-srgb view formats (which are forbidden in compat mode).
+  sRGBManual: 8
 }
 
 const SparkFormatMap = Object.freeze({
@@ -255,6 +258,7 @@ class Spark {
   #supportedFormats
   #supportsFloat16
   #useFragmentShader = false
+  #compatibilityMode = false
   #pipelines = []
   #mipmapPipeline
   #magicMipmapPipeline
@@ -593,9 +597,18 @@ class Spark {
     let colorMode = srgb ? ColorMode.sRGB : ColorMode.Linear
     if (isFormatAlpha(format)) colorMode |= ColorMode.Alpha
     if (options.normal) colorMode = ColorMode.Normal
+    // In compat mode we keep the scratch texture as rgba8unorm (so the encoder bind group
+    // doesn't apply an unwanted sRGB decode); the mipmap fragment shader applies sRGB
+    // averaging in shader instead. This bit toggles that path.
+    if ((colorMode & ColorMode.sRGB) && this.#compatibilityMode) colorMode |= ColorMode.sRGBManual
 
     const webgpuFormat = SparkWebGPUFormats[format] + (srgb ? "-srgb" : "")
-    const viewFormats = srgb ? ["rgba8unorm", "rgba8unorm-srgb"] : ["rgba8unorm"]
+
+    // Scratch textures are always rgba8unorm so the encoder samples raw bytes-as-floats.
+    // In non-compat mode we add an rgba8unorm-srgb view-format alias so the fragment-shader
+    // path can do gamma-correct mipmap averaging via auto sRGB decode/encode. Compat mode
+    // forbids multi-format views, so we drop the alias and rely on sRGBManual in the shader.
+    const viewFormats = this.#compatibilityMode ? undefined : srgb ? ["rgba8unorm", "rgba8unorm-srgb"] : ["rgba8unorm"]
 
     // For now let's just create a texture. Ideally we would use a staging buffer, but in WebGPU it's not possible to create a bufer that
     // both the host can write to and the device can read from a compute shader, so in practice we would need two buffers and to perform
@@ -649,7 +662,7 @@ class Spark {
           mipLevelCount: mipmapCount,
           format: "rgba8unorm",
           usage: inputUsage,
-          viewFormats: viewFormats
+          ...(viewFormats ? { viewFormats } : {})
         })
         if (this.#cacheTempResources) {
           this.#cachedInputTexture = inputTexture
@@ -679,7 +692,7 @@ class Spark {
             format: "rgba8unorm",
             // RENDER_ATTACHMENT usage is necessary for copyExternalImageToTexture
             usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-            viewFormats: viewFormats
+            ...(viewFormats ? { viewFormats } : {})
           })
           if (this.#cacheTempResources) {
             this.#cachedTmpTexture = tmpTexture
@@ -799,7 +812,9 @@ class Spark {
       })
 
       pass.setBindGroup(0, bindGroup)
-      pass.dispatchWorkgroups(Math.ceil(bufferRanges[m].bw / 16), Math.ceil(bufferRanges[m].bh / 16))
+      // Encoder shaders use @workgroup_size(16, 8, 1) to stay within compat mode's
+      // maxComputeInvocationsPerWorkgroup limit of 128.
+      pass.dispatchWorkgroups(Math.ceil(bufferRanges[m].bw / 16), Math.ceil(bufferRanges[m].bh / 8))
     }
 
     pass.end()
@@ -906,6 +921,8 @@ class Spark {
     this.#device = device
     this.#verbose = verbose
     this.#cacheTempResources = cacheTempResources
+    // Core devices expose the "core-features-and-limits" feature; compat devices don't.
+    this.#compatibilityMode = !device.features.has("core-features-and-limits")
 
     this.#supportedFormats = detectWebGPUFormats(this.#device)
     this.#defaultSampler = this.#device.createSampler({
@@ -994,7 +1011,10 @@ class Spark {
     // https://github.com/Ludicon/spark.js/issues/1
     // https://bugzilla.mozilla.org/show_bug.cgi?id=1977241
     const firefoxVersion = getFirefoxVersion()
-    if (firefoxVersion) {
+    if (firefoxVersion || this.#compatibilityMode) {
+      // Compatibility mode disallows binding the same texture through views with
+      // different formats (the rgba8unorm <-> rgba8unorm-srgb trick), so we have to
+      // use the fragment-shader path that does not rely on storage textures.
       this.#useFragmentShader = true
     }
 
@@ -1404,7 +1424,8 @@ class Spark {
 
   // Apply scaling and flipY transform.
   #processInputTextureFragmentShader(encoder, inputTexture, outputTexture, width, height, colorMode, flipY) {
-    const format = (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm"
+    // In compat mode the texture is plain rgba8unorm with sRGBManual handling done in shader.
+    const format = !this.#compatibilityMode && (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm"
 
     const dstView = outputTexture.createView({
       baseMipLevel: 0,
@@ -1438,7 +1459,7 @@ class Spark {
           resource: inputTexture.createView({
             baseMipLevel: 0,
             mipLevelCount: 1,
-            format: (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm",
+            format: format,
             usage: GPUTextureUsage.TEXTURE_BINDING
           })
         },
@@ -1531,7 +1552,9 @@ class Spark {
   }
 
   #generateMipLevelFragmentShader(encoder, texture, srcLevel, dstLevel, width, height, colorMode) {
-    const format = (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm"
+    // In compat mode the texture is plain rgba8unorm and the mipmap fragment shader
+    // applies sRGB conversion in shader via the sRGBManual bit.
+    const format = !this.#compatibilityMode && (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm"
     const dstView = texture.createView({
       baseMipLevel: dstLevel,
       mipLevelCount: 1,
