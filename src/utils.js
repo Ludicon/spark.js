@@ -35,6 +35,53 @@ export function isSvgUrl(url) {
   return /\.svg(?:$|\?)/i.test(url) || /^data:image\/svg\+xml[,;]/i.test(url)
 }
 
+const MIME_FROM_EXT = {
+  avif: "image/avif",
+  webp: "image/webp",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif"
+}
+
+function mimeTypeFromUrl(url) {
+  const ext = url.split("?")[0].split("#")[0].split(".").pop()?.toLowerCase()
+  return MIME_FROM_EXT[ext]
+}
+
+export async function loadImageDecoder(url) {
+  const res = await fetch(url, { mode: "cors" })
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
+
+  const contentType = res.headers.get("Content-Type")?.split(";")[0].trim()
+  const mimeType = contentType || mimeTypeFromUrl(url)
+
+  if (!mimeType || !(await ImageDecoder.isTypeSupported(mimeType))) {
+    // Fall back to createImageBitmap when ImageDecoder can't handle the type.
+    const blob = await res.blob()
+    return createImageBitmap(blob, {
+      imageOrientation: "none",
+      colorSpaceConversion: "none",
+      premultiplyAlpha: "none"
+    })
+  }
+
+  const decoder = new ImageDecoder({
+    data: res.body,
+    type: mimeType,
+    colorSpaceConversion: "none",
+    preferAnimation: false
+  })
+
+  try {
+    // Returns a VideoFrame; caller is responsible for calling .close() on it.
+    const { image } = await decoder.decode({ frameIndex: 0, completeFramesOnly: true })
+    return image
+  } finally {
+    decoder.close()
+  }
+}
+
 export function loadImageElement(url) {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -60,10 +107,18 @@ export async function loadImageBitmap(url) {
 }
 
 const webkitVersion = getSafariVersion()
+const firefoxVersion = getFirefoxVersion()
 
 // Safari 18.2 (Tahoe) introduced support for SVG in copyExternalImageToTexture
 const SAFARI_TAHOE_VERSION = 619.1 // Safari 18.2
 const needsSvgImageBitmapWorkaround = webkitVersion && webkitVersion < SAFARI_TAHOE_VERSION
+
+// Safari always prefers image element over image bitmap.
+// @@ Does this handle RGBA images correctly?
+const useImageElement = webkitVersion
+
+// ImageDecoder is only available in Firefox 133+ and Chrome, but Chrome does not support AVIF.
+const useImageDecoder = (firefoxVersion && firefoxVersion >= 133) || true
 
 async function convertImageElementToImageBitmap(img) {
   // Render HTMLImageElement to canvas, then create ImageBitmap
@@ -90,9 +145,36 @@ export async function loadImage(url) {
     // Older Safari: load SVG as HTMLImageElement, then convert to ImageBitmap
     const img = await loadImageElement(url)
     return convertImageElementToImageBitmap(img)
-  } else if (isSvg || webkitVersion) {
+  } else if (isSvg || useImageElement) {
     return loadImageElement(url)
+  } else if (useImageDecoder) {
+    return loadImageDecoder(url)
   } else {
     return loadImageBitmap(url)
   }
+}
+
+// Decode a Blob to either a VideoFrame (via ImageDecoder) or an ImageBitmap. Mirrors the
+// dispatch in loadImageDecoder/loadImageBitmap but skips the fetch since the bytes are in hand.
+// Caller owns the returned object (close() it when done).
+export async function loadImageFromBlob(blob) {
+  if (useImageDecoder && blob.type && (await ImageDecoder.isTypeSupported(blob.type))) {
+    const decoder = new ImageDecoder({
+      data: blob.stream(),
+      type: blob.type,
+      colorSpaceConversion: "none",
+      preferAnimation: false
+    })
+    try {
+      const { image } = await decoder.decode({ frameIndex: 0, completeFramesOnly: true })
+      return image
+    } finally {
+      decoder.close()
+    }
+  }
+  return createImageBitmap(blob, {
+    imageOrientation: "none",
+    colorSpaceConversion: "none",
+    premultiplyAlpha: "none"
+  })
 }
