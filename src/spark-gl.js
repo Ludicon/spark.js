@@ -1,6 +1,6 @@
 // WebGL implementation of spark.js texture compression API
 import glslShaders from "./shaders/glsl-shaders.js"
-import { assert, loadImage } from "./utils.js"
+import { assert, loadImage, loadImageFromBlob } from "./utils.js"
 
 const SparkFormat = {
   ASTC_4x4_RGB: 0,
@@ -493,10 +493,10 @@ export class SparkGL {
   async encodeTexture(image, options = {}) {
     const gl = this.#gl
 
-    // Resolve URLs by recursing on the loaded image so we can close it (loadImage may
-    // return a VideoFrame on Firefox).
-    if (typeof image === "string") {
-      const loaded = await loadImage(image)
+    // Decode raw byte sources (URLs, Blobs) and recurse so we can close the resulting image
+    // (loadImage / loadImageFromBlob may return a VideoFrame on Firefox).
+    if (typeof image === "string" || image instanceof Blob) {
+      const loaded = image instanceof Blob ? await loadImageFromBlob(image) : await loadImage(image)
       try {
         return await this.encodeTexture(loaded, options)
       } finally {

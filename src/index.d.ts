@@ -150,7 +150,7 @@ export class Spark {
    * @returns Promise resolving to the encoded GPU texture
    */
   encodeTexture(
-    source: string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | GPUTexture,
+    source: string | Blob | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | GPUTexture,
     options?: SparkEncodeOptions
   ): Promise<GPUTexture>
 
@@ -181,7 +181,7 @@ export class Spark {
    * @returns Recommended encoding options with an explicit encoding format
    */
   selectPreferredOptions(
-    source: string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | GPUTexture,
+    source: string | Blob | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | GPUTexture,
     options?: SparkEncodeOptions
   ): Promise<SparkEncodeOptions>
 
@@ -294,7 +294,7 @@ export class SparkGL {
    * @returns Promise resolving to an object containing the encoded texture and metadata
    */
   encodeTexture(
-    source: string | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | WebGLTexture,
+    source: string | Blob | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | WebGLTexture,
     options?: SparkEncodeOptions
   ): Promise<SparkGLTextureResult>
 
