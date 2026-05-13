@@ -1,6 +1,6 @@
 import { defineConfig } from "vite"
 import { resolve } from "path"
-import { copyFileSync, mkdirSync, readdirSync, statSync } from "fs"
+import { copyFileSync, mkdirSync, readdirSync } from "fs"
 import basicSsl from "@vitejs/plugin-basic-ssl"
 
 // Plugin to copy assets directory
