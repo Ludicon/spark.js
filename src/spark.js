@@ -89,7 +89,10 @@ const ColorMode = {
   Linear: 0,
   sRGB: 1,
   Alpha: 2,
-  Normal: 4
+  Normal: 4,
+  // Set when the fragment-shader mipmap path must apply sRGB conversion in shader
+  // instead of relying on rgba8unorm-srgb view formats (which are forbidden in compat mode).
+  sRGBManual: 8
 }
 
 const SparkFormatMap = Object.freeze({
@@ -255,6 +258,7 @@ class Spark {
   #supportedFormats
   #supportsFloat16
   #useFragmentShader = false
+  #compatibilityMode = false
   #pipelines = []
   #mipmapPipeline
   #magicMipmapPipeline
@@ -591,10 +595,13 @@ class Spark {
     const { mipmapCount, outputSize, bufferRanges } = computeMipmapLayout(width, height, blockSize, mipmaps)
 
     // @@ Add a warning when the user requests srgb, but the selected format does not support it.
-    // @@ We could potentially use a smaller format if the compressed format has fewer channels.
     const srgb = (options.srgb || options.format?.endsWith("srgb")) && isFormatRGB(format)
 
-    let colorMode = srgb ? ColorMode.sRGB : ColorMode.Linear
+    let colorMode = ColorMode.Linear
+    if (srgb) {
+      // In compat mode we perform sRGB conversion in the shader.
+      colorMode = this.#compatibilityMode ? ColorMode.sRGBManual : ColorMode.sRGB
+    }
     if (isFormatAlpha(format)) colorMode |= ColorMode.Alpha
     if (options.normal) colorMode = ColorMode.Normal
 
@@ -605,30 +612,35 @@ class Spark {
     // an additional copy. This may still be faster than allocating a texture, but would consume more memory. Also, ideally we could use
     // a single temporary texture that is reused for all texture uploads, and resized/freed as needed.
 
-    // Allocate input texture. @@ This texture could be persistent.
-    const counter = this.#encodeCounter++
-    this.#time("create input texture #" + counter)
-
     let inputUsage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
     if (this.#useFragmentShader) {
       inputUsage |= GPUTextureUsage.RENDER_ATTACHMENT
     } else {
       inputUsage |= GPUTextureUsage.STORAGE_BINDING
     }
+
+    // @@ We could potentially use a smaller format if the compressed format has fewer channels.
     const inputFormat = options.input_bgra ? "bgra8unorm" : "rgba8unorm"
-    const inputViewFormats = options.input_bgra
-      ? srgb
-        ? ["bgra8unorm", "bgra8unorm-srgb"]
-        : ["bgra8unorm"]
-      : srgb
-        ? ["rgba8unorm", "rgba8unorm-srgb"]
-        : ["rgba8unorm"]
+
+    // Compatibility mode forbits multi-format views, so we do not alias and rely on sRGBManual in the shader.
+    const inputViewFormats = this.#compatibilityMode
+      ? undefined
+      : options.input_bgra
+        ? srgb
+          ? ["bgra8unorm", "bgra8unorm-srgb"]
+          : ["bgra8unorm"]
+        : srgb
+          ? ["rgba8unorm", "rgba8unorm-srgb"]
+          : ["rgba8unorm"]
 
     const needsProcessing = options.flipY || width != srcWidth || height != srcHeight
 
     if (!needsProcessing && !(image instanceof GPUTexture)) {
       inputUsage |= GPUTextureUsage.RENDER_ATTACHMENT // This is only necessary for the copyExternalImageToTexture codepath.
     }
+
+    const counter = this.#encodeCounter++
+    this.#time("create input texture #" + counter)
 
     const commandEncoder = this.#device.createCommandEncoder()
 
@@ -638,6 +650,7 @@ class Spark {
       commandEncoder.writeTimestamp(this.#querySet, 0)
     }
 
+    // Allocate input texture.
     let inputTexture
 
     if (needsProcessing || !(image instanceof GPUTexture && !mipmaps)) {
@@ -661,7 +674,7 @@ class Spark {
           mipLevelCount: mipmapCount,
           format: inputFormat,
           usage: inputUsage,
-          viewFormats: inputViewFormats
+          ...(inputViewFormats ? { viewFormats: inputViewFormats } : {})
         })
         if (this.#cacheTempResources) {
           this.#cachedInputTexture = inputTexture
@@ -695,7 +708,7 @@ class Spark {
             format: inputFormat,
             // RENDER_ATTACHMENT usage is necessary for copyExternalImageToTexture
             usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-            viewFormats: inputViewFormats
+            ...(inputViewFormats ? { viewFormats: inputViewFormats } : {})
           })
           if (this.#cacheTempResources) {
             this.#cachedTmpTexture = tmpTexture
@@ -815,7 +828,9 @@ class Spark {
       })
 
       pass.setBindGroup(0, bindGroup)
-      pass.dispatchWorkgroups(Math.ceil(bufferRanges[m].bw / 16), Math.ceil(bufferRanges[m].bh / 16))
+      // Encoder shaders use @workgroup_size(16, 8, 1) to stay within compat mode's
+      // maxComputeInvocationsPerWorkgroup limit of 128.
+      pass.dispatchWorkgroups(Math.ceil(bufferRanges[m].bw / 16), Math.ceil(bufferRanges[m].bh / 8))
     }
 
     pass.end()
@@ -922,6 +937,8 @@ class Spark {
     this.#device = device
     this.#verbose = verbose
     this.#cacheTempResources = cacheTempResources
+    // Core devices expose the "core-features-and-limits" feature; compat devices don't.
+    this.#compatibilityMode = !device.features.has("core-features-and-limits")
 
     this.#supportedFormats = detectWebGPUFormats(this.#device)
     this.#defaultSampler = this.#device.createSampler({
@@ -1010,7 +1027,10 @@ class Spark {
     // https://github.com/Ludicon/spark.js/issues/1
     // https://bugzilla.mozilla.org/show_bug.cgi?id=1977241
     const firefoxVersion = getFirefoxVersion()
-    if (firefoxVersion) {
+    if (firefoxVersion || this.#compatibilityMode) {
+      // Compatibility mode disallows binding the same texture through views with
+      // different formats (the rgba8unorm <-> rgba8unorm-srgb trick), so we have to
+      // use the fragment-shader path that does not rely on storage textures.
       this.#useFragmentShader = true
     }
 
@@ -1019,7 +1039,7 @@ class Spark {
       this.#resizePipeline = {}
       this.#flipYPipeline = {}
 
-      const formats = ["rgba8unorm-srgb", "rgba8unorm"]
+      const formats = ["rgba8unorm-srgb", "rgba8unorm", "bgra8unorm-srgb", "bgra8unorm"]
 
       for (const format of formats) {
         this.#mipmapPipeline[format] = this.#device.createRenderPipeline({
@@ -1420,7 +1440,7 @@ class Spark {
 
   // Apply scaling and flipY transform.
   #processInputTextureFragmentShader(encoder, inputTexture, outputTexture, width, height, colorMode, flipY) {
-    const format = (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm"
+    const format = inputTexture.format + ((colorMode & ColorMode.sRGB) != 0 ? "-srgb" : "")
 
     const dstView = outputTexture.createView({
       baseMipLevel: 0,
@@ -1454,7 +1474,7 @@ class Spark {
           resource: inputTexture.createView({
             baseMipLevel: 0,
             mipLevelCount: 1,
-            format: (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm",
+            format: format,
             usage: GPUTextureUsage.TEXTURE_BINDING
           })
         },
@@ -1547,7 +1567,8 @@ class Spark {
   }
 
   #generateMipLevelFragmentShader(encoder, texture, srcLevel, dstLevel, width, height, colorMode) {
-    const format = (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm"
+    const format = texture.format + ((colorMode & ColorMode.sRGB) != 0 ? "-srgb" : "")
+
     const dstView = texture.createView({
       baseMipLevel: dstLevel,
       mipLevelCount: 1,

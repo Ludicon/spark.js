@@ -69,6 +69,8 @@ Creates a new Spark instance for WebGPU.
 
 **Returns:** `Promise<Spark>` - Initialized Spark instance.
 
+Compatibility-mode codepaths are auto-enabled when the device doesn't expose the `"core-features-and-limits"` feature.
+
 #### `Spark.getRequiredFeatures(adapter)` → `string[]`
 
 Static method that inspects a WebGPU adapter and returns the list of features required by spark.js.
