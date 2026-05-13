@@ -597,12 +597,13 @@ class Spark {
     // @@ Add a warning when the user requests srgb, but the selected format does not support it.
     const srgb = (options.srgb || options.format?.endsWith("srgb")) && isFormatRGB(format)
 
-    let colorMode = srgb ? ColorMode.sRGB : ColorMode.Linear
+    let colorMode = ColorMode.Linear
+    if (srgb) {
+      // In compat mode we perform sRGB conversion in the shader.
+      colorMode = this.#compatibilityMode ? ColorMode.sRGBManual : ColorMode.sRGB
+    }
     if (isFormatAlpha(format)) colorMode |= ColorMode.Alpha
     if (options.normal) colorMode = ColorMode.Normal
-    // In compat mode we keep the scratch texture as rgba8unorm and the mipmap fragment shader applies sRGB
-    // conversion in shader instead.
-    if (colorMode & ColorMode.sRGB && this.#compatibilityMode) colorMode |= ColorMode.sRGBManual
 
     const webgpuFormat = SparkWebGPUFormats[format] + (srgb ? "-srgb" : "")
 
@@ -673,7 +674,7 @@ class Spark {
           mipLevelCount: mipmapCount,
           format: inputFormat,
           usage: inputUsage,
-          ...(inputViewFormats ? { inputViewFormats } : {})
+          ...(inputViewFormats ? { viewFormats: inputViewFormats } : {})
         })
         if (this.#cacheTempResources) {
           this.#cachedInputTexture = inputTexture
@@ -707,7 +708,7 @@ class Spark {
             format: inputFormat,
             // RENDER_ATTACHMENT usage is necessary for copyExternalImageToTexture
             usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-            ...(inputViewFormats ? { inputViewFormats } : {})
+            ...(inputViewFormats ? { viewFormats: inputViewFormats } : {})
           })
           if (this.#cacheTempResources) {
             this.#cachedTmpTexture = tmpTexture
@@ -1038,7 +1039,7 @@ class Spark {
       this.#resizePipeline = {}
       this.#flipYPipeline = {}
 
-      const formats = ["rgba8unorm-srgb", "rgba8unorm"]
+      const formats = ["rgba8unorm-srgb", "rgba8unorm", "bgra8unorm-srgb", "bgra8unorm"]
 
       for (const format of formats) {
         this.#mipmapPipeline[format] = this.#device.createRenderPipeline({
@@ -1439,8 +1440,7 @@ class Spark {
 
   // Apply scaling and flipY transform.
   #processInputTextureFragmentShader(encoder, inputTexture, outputTexture, width, height, colorMode, flipY) {
-    // In compat mode the texture is plain rgba8unorm with sRGBManual handling done in shader.
-    const format = !this.#compatibilityMode && (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm"
+    const format = inputTexture.format + ((colorMode & ColorMode.sRGB) != 0 ? "-srgb" : "")
 
     const dstView = outputTexture.createView({
       baseMipLevel: 0,
@@ -1567,9 +1567,8 @@ class Spark {
   }
 
   #generateMipLevelFragmentShader(encoder, texture, srcLevel, dstLevel, width, height, colorMode) {
-    // In compat mode the texture is plain rgba8unorm and the mipmap fragment shader
-    // applies sRGB conversion in shader via the sRGBManual bit.
-    const format = !this.#compatibilityMode && (colorMode & ColorMode.sRGB) != 0 ? "rgba8unorm-srgb" : "rgba8unorm"
+    const format = texture.format + ((colorMode & ColorMode.sRGB) != 0 ? "-srgb" : "")
+
     const dstView = texture.createView({
       baseMipLevel: dstLevel,
       mipLevelCount: 1,
