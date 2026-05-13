@@ -67,6 +67,20 @@ jobs:
           folder: dist-examples
           target-folder: ${{ steps.config.outputs.target_folder }}
 
+      - name: Ensure .nojekyll exists at gh-pages root
+        if: steps.config.outputs.is_branch == 'true'
+        run: |
+          git fetch origin gh-pages
+          git checkout gh-pages
+          if [ ! -f ".nojekyll" ]; then
+            touch .nojekyll
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .nojekyll
+            git commit -m "Add .nojekyll"
+            git push origin gh-pages
+          fi
+
       - name: Output deployment URL
         run: |
           echo "## 🚀 Deployment" >> "$GITHUB_STEP_SUMMARY"
