@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+  <!-- prettier-ignore -->
+  <head>
+    <title>spark.js - Mipmapping example (WebGPU)</title>
+    <style>
+      body { margin: 0; font-family: sans-serif; }
+      canvas { display: block; }
+      #controls {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 15px 20px;
+        border-radius: 8px;
+        z-index: 100;
+      }
+      #controls label {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 14px;
+      }
+      #controls select {
+        padding: 5px 10px;
+        font-size: 14px;
+        border-radius: 4px;
+        border: 1px solid #555;
+        background: #333;
+        color: white;
+        cursor: pointer;
+      }
+      #controls select:hover {
+        background: #444;
+      }
+      #status {
+        margin-top: 10px;
+        font-size: 12px;
+        color: #aaa;
+      }
+    </style>
+    <script type="module" crossorigin src="/spark.js/branches/deploy-from-branches/assets/mipmaps-Bh1yMZVy.js"></script>
+    <link rel="modulepreload" crossorigin href="/spark.js/branches/deploy-from-branches/assets/utils-muNxmGmb.js">
+    <link rel="modulepreload" crossorigin href="/spark.js/branches/deploy-from-branches/assets/preload-helper-56FapS8O.js">
+    <link rel="modulepreload" crossorigin href="/spark.js/branches/deploy-from-branches/assets/spark-eqDjPhLn.js">
+  </head>
+
+  <body>
+    <div id="controls">
+      <label for="mipmapFilter">Mipmap Filter:</label>
+      <select id="mipmapFilter">
+        <option value="magic" selected>Magic</option>
+        <option value="box">Box</option>
+      </select>
+      <div id="status"></div>
+    </div>
+  </body>
+</html>

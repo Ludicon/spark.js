@@ -1,0 +1,7 @@
+import"./utils-muNxmGmb.js";import{W as b}from"./three.module-BEn9avOU.js";import{S as v}from"./spark-gl-c7CSfKeD.js";import{E as L,M as W,S as y,O as G,P as M,a as S}from"./three.core-D4Wv7CJS.js";import"./preload-helper-56FapS8O.js";const E=`
+      <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
+        <h1>WebGL2 Not Supported</h1>
+        <p>This demo requires a browser with WebGL2 support.</p>
+        <p>Please try using a modern browser like <strong>Chrome</strong>, <strong>Firefox</strong>, <strong>Edge</strong>, or <strong>Safari</strong>.</p>
+        <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API" target="_blank">MDN: WebGL API</a></p>
+      </div>`,s=document.createElement("canvas");document.body.appendChild(s);const o=s.getContext("webgl2");if(!o)throw document.body.innerHTML=E,new Error("WebGL2 not supported");const m=new b({canvas:s,context:o}),P=v.create(o,{verbose:!0}),r=await P.encodeTexture("./assets/kodim23.avif",{srgb:!0,flipY:!0,generateMipmaps:!0}),T=new L(r.texture),k=new W({map:T}),g=new y,l=new G(-1,1,1,-1,.1,10);l.position.z=1;const z=new M(2,2),w=new S(z,k);g.add(w);function u(){const a=window.innerWidth,i=window.innerHeight,e=document.querySelector("canvas");(e.width!==a||e.height!==i)&&(e.width=a,e.height=i);const c=e.width,d=e.height;m.setSize(c,d,!1);const f=r?.width||1,x=r?.height||1,t=c/d,n=f/x;let p=1,h=1;n>t?h=t/n:p=n/t,w.scale.set(p,h,1),m.render(g,l)}window.addEventListener("resize",u);u();
