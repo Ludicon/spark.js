@@ -15,7 +15,7 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     environment:
-      name: github-pages
+      name: ${{ github.ref_name == 'main' && 'github-pages' || 'preview' }}
       url: https://ludicon.github.io${{ steps.config.outputs.base_path }}
     steps:
       - name: Checkout
