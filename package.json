@@ -11,6 +11,10 @@
       "import": "./dist/spark.esm.js",
       "types": "./src/index.d.ts"
     },
+    "./three": {
+      "import": "./src/three.js",
+      "types": "./src/three.d.ts"
+    },
     "./three-gltf": {
       "import": "./src/three-gltf.js",
       "types": "./src/three-gltf.d.ts"
@@ -18,6 +22,8 @@
   },
   "files": [
     "dist",
+    "src/three.js",
+    "src/three.d.ts",
     "src/three-gltf.js",
     "src/three-gltf.d.ts",
     "src/index.d.ts",
