@@ -1,4 +1,4 @@
-import"./utils-muNxmGmb.js";import{S as m}from"./spark-eqDjPhLn.js";import"./preload-helper-56FapS8O.js";const g=`
+import"./utils-CnlaH6UJ.js";import{S as m}from"./spark-D1ZWJlBg.js";const g=`
           <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
             <h1>WebGPU Not Supported</h1>
             <p>This demo requires a browser with WebGPU support.</p>

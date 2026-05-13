@@ -1,4 +1,4 @@
-import"./utils-muNxmGmb.js";import{W as b}from"./three.module-BEn9avOU.js";import{S as v}from"./spark-gl-c7CSfKeD.js";import{E as L,M as W,S as y,O as G,P as M,a as S}from"./three.core-D4Wv7CJS.js";import"./preload-helper-56FapS8O.js";const E=`
+import"./utils-CnlaH6UJ.js";import{W as b}from"./three.module-BKBhYdkm.js";import{S as v}from"./spark-gl-CWgqRna7.js";import{E as L,M as W,S as y,O as G,P as M,a as S}from"./three.core-BbTg8uWb.js";const E=`
       <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
         <h1>WebGL2 Not Supported</h1>
         <p>This demo requires a browser with WebGL2 support.</p>

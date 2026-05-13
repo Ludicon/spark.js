@@ -1,4 +1,4 @@
-import"./utils-muNxmGmb.js";import{S as C}from"./spark-gl-c7CSfKeD.js";import"./preload-helper-56FapS8O.js";const g=`
+import"./utils-CnlaH6UJ.js";import{S as C}from"./spark-gl-CWgqRna7.js";const g=`
           <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
             <h1>WebGL2 Not Supported</h1>
             <p>This demo requires a browser with WebGL2 support.</p>

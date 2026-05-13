@@ -1,4 +1,4 @@
-import"./utils-muNxmGmb.js";import{S as L}from"./spark-gl-c7CSfKeD.js";import"./preload-helper-56FapS8O.js";function a(r){const e=document.createElement("div");e.id="error",e.innerHTML=`
+import"./utils-CnlaH6UJ.js";import{S as L}from"./spark-gl-CWgqRna7.js";function a(r){const e=document.createElement("div");e.id="error",e.innerHTML=`
           <h1>Error</h1>
           <p>${r}</p>
         `,document.body.appendChild(e)}async function C(){const r=document.getElementById("glCanvas"),e=r.getContext("webgl2",{antialias:!1,depth:!1,stencil:!1});if(!e){a("WebGL2 is not supported. Please use a modern browser.");return}r.width=window.innerWidth,r.height=window.innerHeight;const s=L.create(e,{preload:["rgb"],verbose:!0}),c=s.getSupportedFormats();if(console.log("Supported formats:",c),c.length===0){a("No compressed texture formats are supported on this device. Please try a different browser or device.");return}const f="./assets/kodim23.avif";let i;try{i=await s.encodeTexture(f),console.log("Compressed texture:",i)}catch(n){a(`Failed to compress texture: ${n.message}`),console.error(n);return}const h=`#version 300 es
