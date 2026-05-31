@@ -197,9 +197,9 @@ tiles.registerPlugin( new GLTFExtensionsPlugin( {
 
 ## License
 
-*spark.js* is free for non-commercial use. 
+*spark.js* is free for non-commercial use, or until your product reaches $100,000 in lifetime revenue.
 
-- The JavaScript code is released under MIT license. 
-- Use of the *Spark* shaders is covered under the <a href="https://ludicon.com/sparkjs/eula.html">*spark.js* EULA</a>. 
+- The JavaScript code is released under the [MIT license](LICENSE).
+- Use of the *Spark* shaders is covered under the [*spark.js* EULA](https://ludicon.com/sparkjs/eula.html).
 
-See https://ludicon.com/sparkjs#Licensing for details on how to use *spark.js* in commercial projects.
+See [ludicon.com/sparkjs#licensing](https://ludicon.com/sparkjs#Licensing) for the full licensing details.
