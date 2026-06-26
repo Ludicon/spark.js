@@ -259,6 +259,7 @@ class Spark {
   #supportsFloat16
   #useFragmentShader = false
   #compatibilityMode = false
+  #supportsUnalignedTextures = false
   #pipelines = []
   #mipmapPipeline
   #magicMipmapPipeline
@@ -442,6 +443,11 @@ class Spark {
       features.push("timestamp-query")
     }
 
+    // Request texture-compression-unaligned support.
+    if (adapter.features.has("texture-compression-unaligned")) {
+      features.push("texture-compression-unaligned")
+    }
+
     return features
   }
 
@@ -585,10 +591,9 @@ class Spark {
     // Start loading the pipeline as soon as we know the format.
     const pipelinePromise = this.#loadPipeline(format)
 
-    // Round up the size to meet WebGPU requirements.
-    // It would be great if this contstraint was optional. The only API still requiring it is D3D12.
-    const width = Math.ceil(srcWidth / 4) * 4
-    const height = Math.ceil(srcHeight / 4) * 4
+    // Round up the size to meet WebGPU's 4-texel alignment requirement, unless the texture-compression-unaligned feature lifts it.
+    const width = this.#supportsUnalignedTextures ? srcWidth : Math.ceil(srcWidth / 4) * 4
+    const height = this.#supportsUnalignedTextures ? srcHeight : Math.ceil(srcHeight / 4) * 4
     const blockSize = SparkBlockSize[format]
     const mipmaps = options.generateMipmaps || options.mips
 
@@ -939,6 +944,8 @@ class Spark {
     this.#cacheTempResources = cacheTempResources
     // Core devices expose the "core-features-and-limits" feature; compat devices don't.
     this.#compatibilityMode = !device.features.has("core-features-and-limits")
+    // When supported, texture-compression-unaligned lifts the block alignment requirement.
+    this.#supportsUnalignedTextures = device.features.has("texture-compression-unaligned")
 
     this.#supportedFormats = detectWebGPUFormats(this.#device)
     this.#defaultSampler = this.#device.createSampler({
