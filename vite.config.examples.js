@@ -57,6 +57,7 @@ export default defineConfig({
         video: resolve(__dirname, "examples/video.html"),
         "video-gl": resolve(__dirname, "examples/video-gl.html"),
         realtime: resolve(__dirname, "examples/realtime.html"),
+        unaligned: resolve(__dirname, "examples/unaligned.html"),
         "three-basic": resolve(__dirname, "examples/three-basic.html"),
         "three-basic-gl": resolve(__dirname, "examples/three-basic-gl.html"),
         "three-gltf": resolve(__dirname, "examples/three-gltf.html"),
