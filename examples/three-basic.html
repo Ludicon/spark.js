@@ -15,6 +15,7 @@
     <script type="module">
       import * as THREE from "three/webgpu"
       import { Spark } from "@ludicon/spark.js"
+      import { SparkThreeExternalTexture } from "@ludicon/spark.js/three"
 
       const errorHTML = `
       <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
@@ -63,8 +64,11 @@
       // Load and encode texture using spark:
       const gpuTexture = await spark.encodeTexture("./assets/kodim23.avif", { srgb: true, flipY: true })
 
-      // Wrap the GPUTexture for three.js
-      const externalTex = new THREE.ExternalTexture(gpuTexture)
+      // Wrap the GPUTexture for three.js. SparkThreeExternalTexture refcounts
+      // the shared GPUTexture so clones and sibling wrappers stay valid until
+      // the last one is disposed.
+      const release = tex => tex.destroy()
+      const externalTex = new SparkThreeExternalTexture(gpuTexture, release)
 
       // Basic unlit material using the external texture
       const material = new THREE.MeshBasicMaterial({ map: externalTex })
