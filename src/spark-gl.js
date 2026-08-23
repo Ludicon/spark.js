@@ -331,15 +331,26 @@ export class SparkGL {
   dispose() {
     const gl = this.#gl
 
+    // Scratch first, and unconditionally: #programs holds PROMISES (see #loadProgram), so
+    // the loop below used to hand a Promise to gl.deleteProgram and throw before ever
+    // reaching this call -- leaving the buffer, render target and FBO alive for the lifetime
+    // of the context.
+    this.freeTempResources()
+
     if (this.#fullscreenVertexShader) {
       gl.deleteShader(this.#fullscreenVertexShader)
     }
-    for (const program of this.#programs) {
-      gl.deleteProgram(program)
+    for (const entry of this.#programs) {
+      if (!entry) continue
+      // A program may still be compiling. Resolve first, and swallow a rejected load: a
+      // shader that failed to compile has nothing to delete, and dispose() must not be the
+      // place that surfaces it.
+      Promise.resolve(entry).then(
+        (program) => { if (program) gl.deleteProgram(program) },
+        () => {},
+      )
     }
-
-    // Clean up cached temporary resources
-    this.freeTempResources()
+    this.#programs = []
   }
 
   /**
