@@ -614,7 +614,6 @@ export class SparkGL {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 0)
 
     gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, gl.RGBA8, width, height)
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, image)
@@ -697,7 +696,6 @@ export class SparkGL {
     if (generateMipmaps) {
       gl.bindTexture(gl.TEXTURE_2D, encodeSrcTexture)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, mipmapCount - 1)
       gl.generateMipmap(gl.TEXTURE_2D)
       this.#log(`Generated ${mipmapCount} mipmap levels`)
     }
@@ -833,7 +831,6 @@ export class SparkGL {
       // Bind input texture at current mip level
       gl.bindTexture(gl.TEXTURE_2D, encodeSrcTexture)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, mipLevel)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, mipLevel)
 
       // Draw fullscreen triangle on the render target using the FBO
       gl.viewport(0, 0, mipBw, mipBh)
