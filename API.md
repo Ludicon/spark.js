@@ -63,7 +63,7 @@ Creates a new Spark instance for WebGPU.
 - `device` (`GPUDevice`) - WebGPU device with required features enabled
 - `options` (`Object`, optional) - Configuration options:
   - `preload` (`boolean` or `string[]`, default: `false`) - Whether to preload all or a subset of the encoder pipelines. Pipelines that are not preloaded are compiled on-demand when first used.
-  - `cacheTempResources` (`boolean`, default: `false`) - Whether to cache temporary resources for reuse across `encodeTexture` calls. Improves performance when encoding multiple textures, but uses more GPU memory.
+  - `cacheTempResources` (`boolean`, default: `false`) - Whether to cache temporary resources for reuse across `encodeTexture` calls. Cached resources grow to fit the largest encode and are freed by `freeTempResources()` or `dispose()`. Improves performance when encoding multiple textures.
   - `verbose` (`boolean`, default: `false`) - Enable verbose logging for debugging.
   - `useTimestampQueries` (`boolean`, default: `false`) - Enable GPU timestamp queries for performance profiling (requires `timestamp-query` feature and enabling unsafe WebGPU features in the browser).
 
@@ -104,7 +104,7 @@ Creates a new SparkGL instance for WebGL2.
     - `false` - Load shaders on-demand
     - `true` - Preload all supported formats
     - `string[]` - Array of format names to preload (e.g., `["bc7", "astc"]`)
-  - `cacheTempResources` (`boolean`, default: `false`) - Whether to cache temporary resources for reuse across `encodeTexture` calls.
+  - `cacheTempResources` (`boolean`, default: `false`) - Whether to cache temporary resources for reuse across `encodeTexture` calls. Cached resources grow to fit the largest encode and are freed by `freeTempResources()` or `dispose()`. Improves performance when encoding multiple textures.
   - `verbose` (`boolean`, default: `false`) - Enable verbose logging for debugging.
   - `validateShaders` (`boolean`, default: `false`) - Enable WebGL shader validation. Only enable thsi for debuggigng, as it disables async shader compilation.
 
