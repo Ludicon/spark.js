@@ -390,16 +390,28 @@ export class SparkGL {
    * At most one texture is retained per shape. freeTempResources() drops them all.
    */
   #acquireSrcTexture(width, height) {
+    const gl = this.#gl
     if (this.#cacheTempResources) {
       const free = this.#srcPool.get(`${width}x${height}`)
       if (free && free.length > 0) {
         this.#srcServed++
         const texture = free.pop()
+        // Hand back a texture in the state a FRESH one would be in.
+        //
+        // TEXTURE_BASE_LEVEL is the one parameter the encode loop dirties and nobody
+        // repairs: it is set to the level being encoded and left at the last one. A freshly
+        // created texture starts at 0, which is why nothing here ever had to set it --
+        // pooling is what breaks that assumption. Left at 10, the next generateMipmap
+        // sources from level 10 and derives nothing below it, so levels 1..9 keep the
+        // PREVIOUS image's content. Clearing them would not help: they are regenerated, but
+        // only from BASE_LEVEL up.
+        gl.bindTexture(gl.TEXTURE_2D, texture)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, 0)
         return { texture, pooled: true }
       }
     }
     this.#srcAllocated++
-    return { texture: this.#gl.createTexture(), pooled: false }
+    return { texture: gl.createTexture(), pooled: false }
   }
 
   /** Return a source copy to the pool, or delete it when pooling is off. */
@@ -964,14 +976,27 @@ export class SparkGL {
     // Setup rendering state
     gl.useProgram(program)
 
-    // Encode each mipmap level
-    for (let mipLevel = 0; mipLevel < mipmapCount; mipLevel++) {
+    // Encode each mipmap level. options.levelRange = [first, last] restricts that to a
+    // window; a skipped level costs no draw, no readback and no upload. The point is to stop
+    // re-encoding levels the caller already has -- filling one pyramid in two passes
+    // otherwise re-encodes the whole chain on the second and throws most of it away.
+    //
+    // The source's chain is still generated in full above: level `first` has to exist first.
+    const firstLevel = Math.max(0, options.levelRange ? options.levelRange[0] | 0 : 0)
+    const lastLevel = Math.min(mipmapCount - 1, options.levelRange ? options.levelRange[1] | 0 : mipmapCount - 1)
+    if (firstLevel > lastLevel) {
+      throw new Error(`levelRange [${firstLevel}, ${lastLevel}] selects no level of a ${mipmapCount}-level encode`)
+    }
+    let levelsWritten = 0
+
+    for (let mipLevel = firstLevel; mipLevel <= lastLevel; mipLevel++) {
       const mipWidth = Math.max(1, Math.floor(width >> mipLevel))
       const mipHeight = Math.max(1, Math.floor(height >> mipLevel))
       const mipBw = Math.ceil(mipWidth / 4)
       const mipBh = Math.ceil(mipHeight / 4)
       const mipSize = blockSize * mipBw * mipBh
       byteLength += mipSize
+      levelsWritten++
 
       // Bind input texture at current mip level
       gl.bindTexture(gl.TEXTURE_2D, encodeSrcTexture)
@@ -1042,8 +1067,12 @@ export class SparkGL {
       srgb,
       mipmapCount,
       byteLength,
-      // Where this encode landed in the output texture. A caller that reuses the texture
-      // needs it back to know which levels it now owns.
+      // Which levels this encode actually wrote, and where they landed in the output
+      // texture. Under levelRange these are not mipmapCount levels starting at 0, and a
+      // caller that reads mipmapCount alone would believe it has levels nobody encoded.
+      levelsWritten,
+      firstLevel,
+      lastLevel,
       outputBaseLevel
     }
 

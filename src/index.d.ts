@@ -129,6 +129,18 @@ export interface SparkEncodeOptions {
    * @default 0
    */
   outputBaseLevel?: number
+
+  /**
+   * Encode only levels `[first, last]` of the mip chain, inclusive.
+   *
+   * Levels outside the window cost no draw, no readback and no upload. Use it to fill a
+   * pyramid in more than one pass without re-encoding what a previous pass already wrote.
+   * The source's own mip chain is still generated in full, since level `first` has to exist
+   * before it can be encoded.
+   *
+   * @default the whole chain
+   */
+  levelRange?: [number, number]
 }
 
 /**
@@ -290,6 +302,19 @@ export interface SparkGLTextureResult {
    * Number of mipmap levels
    */
   mipmapCount: number
+
+  /**
+   * How many levels this call actually encoded. Equal to `mipmapCount` unless `levelRange`
+   * narrowed the window — read this, not `mipmapCount`, to know what was written.
+   */
+  levelsWritten?: number
+
+  /** First and last level encoded, in this encode's own numbering. */
+  firstLevel?: number
+  lastLevel?: number
+
+  /** Level of `outputTexture` that `firstLevel` was written to. 0 unless asked otherwise. */
+  outputBaseLevel?: number
 
   /**
    * Whether the texture is encoded in an sRGB format
