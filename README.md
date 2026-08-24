@@ -73,6 +73,17 @@ npm run build
 npm run watch
 ```
 
+### Tests
+
+Tests run in headless Chromium, since the encoders need a real WebGL2/WebGPU context. Chromium is downloaded once with Playwright:
+
+```bash
+npx playwright install chromium
+npm test
+```
+
+To debug a test in a regular browser, run `npm run serve` and open `http://localhost:5173/tests/harness.html`.
+
 ## Examples
 
 Live examples are available at: **https://ludicon.github.io/spark.js/**

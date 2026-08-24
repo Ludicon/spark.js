@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>spark.js tests</title>
+  </head>
+  <body>
+    <pre id="output"></pre>
+    <script type="module">
+      import { run } from "./harness.js"
+      import "./browser/spark-gl.test.js"
+      import "./browser/spark.test.js"
+      run()
+    </script>
+  </body>
+</html>
