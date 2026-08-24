@@ -615,7 +615,10 @@ export class SparkGL {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 0)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, image)
+
+    gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, gl.RGBA8, width, height)
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, image)
+
 
     // This kind of sucks. We need to flip the texture vertically manually because not all
     // image loading code paths support flipping, and UNPACK_FLIP_Y_WEBGL does not appear to work.
@@ -637,7 +640,7 @@ export class SparkGL {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
-      gl.texStorage2D(gl.TEXTURE_2D, generateMipmaps ? mipmapCount : 1, gl.RGBA8, width, height)
+      gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, gl.RGBA8, width, height)
 
       // Create temporary FBO for flipping
       const flipFbo = gl.createFramebuffer()
