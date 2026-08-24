@@ -566,6 +566,7 @@ export class SparkGL {
       scissorTest: gl.getParameter(gl.SCISSOR_TEST),
       pixelPackBuffer: gl.getParameter(gl.PIXEL_PACK_BUFFER_BINDING),
       pixelUnpackBuffer: gl.getParameter(gl.PIXEL_UNPACK_BUFFER_BINDING),
+      unpackFlipY: gl.getParameter(gl.UNPACK_FLIP_Y_WEBGL),
       arrayBuffer: gl.getParameter(gl.ARRAY_BUFFER_BINDING),
       vertexArray: gl.getParameter(gl.VERTEX_ARRAY_BINDING)
     }
@@ -616,86 +617,13 @@ export class SparkGL {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 0)
 
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, Boolean(options.flipY))
     gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, gl.RGBA8, width, height)
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, image)
 
-
-    // This kind of sucks. We need to flip the texture vertically manually because not all
-    // image loading code paths support flipping, and UNPACK_FLIP_Y_WEBGL does not appear to work.
-    // I think the problem is that it's emulated with shader changes, but we sample the texture
-    // with textureFetch, which appears to bypass that.
-
-    // gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, options.flipY)
-
-    // If we end up using the code below, let's move the program creation to #init.
-
-    let encodeSrcTexture = srcTexture
-    if (options.flipY) {
-      this.#log("Flipping texture vertically")
-
-      // Create intermediate texture
-      const flippedTexture = gl.createTexture()
-      gl.bindTexture(gl.TEXTURE_2D, flippedTexture)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
-      gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, gl.RGBA8, width, height)
-
-      // Create temporary FBO for flipping
-      const flipFbo = gl.createFramebuffer()
-      gl.bindFramebuffer(gl.FRAMEBUFFER, flipFbo)
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, flippedTexture, 0)
-
-      if (!this.#fullscreenVertexShader) {
-        this.#fullscreenVertexShader = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SOURCE, this.#validateShaders)
-      }
-
-      // Simple blit shader to flip the texture using texelFetch
-      const flipFs = `#version 300 es
-        precision mediump float;
-        uniform sampler2D uTexture;
-        uniform ivec2 uTextureSize;
-        out vec4 fragColor;
-        void main() {
-          ivec2 coord = ivec2(gl_FragCoord.xy);
-          // Flip Y coordinate
-          coord.y = uTextureSize.y - 1 - coord.y;
-          fragColor = texelFetch(uTexture, coord, 0);
-        }`
-
-      const vsShader = gl.createShader(gl.VERTEX_SHADER)
-      gl.shaderSource(vsShader, VERTEX_SHADER_SOURCE)
-      gl.compileShader(vsShader)
-
-      const fsShader = gl.createShader(gl.FRAGMENT_SHADER)
-      gl.shaderSource(fsShader, flipFs)
-      gl.compileShader(fsShader)
-
-      const flipProgram = createProgram(gl, vsShader, fsShader, this.#validateShaders)
-
-      // Render flipped texture
-      gl.useProgram(flipProgram)
-      gl.viewport(0, 0, width, height)
-      gl.activeTexture(gl.TEXTURE0)
-      gl.bindTexture(gl.TEXTURE_2D, srcTexture)
-      gl.uniform1i(gl.getUniformLocation(flipProgram, "uTexture"), 0)
-      gl.uniform2i(gl.getUniformLocation(flipProgram, "uTextureSize"), width, height)
-      gl.drawArrays(gl.TRIANGLES, 0, 3)
-
-      // Cleanup blit resources
-      gl.deleteShader(vsShader)
-      gl.deleteShader(fsShader)
-      gl.deleteProgram(flipProgram)
-      gl.deleteFramebuffer(flipFbo)
-      gl.deleteTexture(srcTexture)
-
-      encodeSrcTexture = flippedTexture
-    }
-
     // Generate mipmaps if requested
     if (generateMipmaps) {
-      gl.bindTexture(gl.TEXTURE_2D, encodeSrcTexture)
+      gl.bindTexture(gl.TEXTURE_2D, srcTexture)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, mipmapCount - 1)
       gl.generateMipmap(gl.TEXTURE_2D)
@@ -831,7 +759,7 @@ export class SparkGL {
       byteLength += mipSize
 
       // Bind input texture at current mip level
-      gl.bindTexture(gl.TEXTURE_2D, encodeSrcTexture)
+      gl.bindTexture(gl.TEXTURE_2D, srcTexture)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, mipLevel)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, mipLevel)
 
@@ -853,7 +781,7 @@ export class SparkGL {
       gl.deleteBuffer(dstBuffer)
       gl.deleteFramebuffer(fbo)
     }
-    gl.deleteTexture(encodeSrcTexture)
+    gl.deleteTexture(srcTexture)
 
     // Restore GL state
     gl.bindFramebuffer(gl.FRAMEBUFFER, savedState.framebuffer)
@@ -864,6 +792,7 @@ export class SparkGL {
     gl.viewport(savedState.viewport[0], savedState.viewport[1], savedState.viewport[2], savedState.viewport[3])
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, savedState.pixelPackBuffer)
     gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, savedState.pixelUnpackBuffer)
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, savedState.unpackFlipY)
 
     // Restore enable/disable state
     if (savedState.blend) gl.enable(gl.BLEND)
