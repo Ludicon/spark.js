@@ -305,6 +305,17 @@ export class SparkGL {
   // Cached temporary resources for encodeTexture
   #cachedBuffer = null
   #cachedBufferSize = 0
+  /**
+   * Free source copies, keyed by exact shape ("WxH"). See #acquireSrcTexture.
+   *
+   * Separate from the #cachedTexture8/16 pair below because it answers a different question.
+   * Those are ONE render target that grows to fit the largest encode; this is a set, because
+   * a caller encoding a 4096 and a 256 needs both shapes and neither can stand in for the
+   * other — the encode reads the source with texelFetch at its own dimensions.
+   */
+  #srcPool = new Map()
+  #srcServed = 0
+  #srcAllocated = 0
   #cachedTexture8 = null // For 8-byte per block formats
   #cachedTexture8Width = 0
   #cachedTexture8Height = 0
@@ -351,6 +362,82 @@ export class SparkGL {
       )
     }
     this.#programs = []
+  }
+
+  /**
+   * Take a source-copy texture of this shape from the pool, or make one.
+   *
+   * The source copy is a full RGBA8 mip chain of the image being encoded -- 85 MB for a 4096
+   * -- and it was created and deleted on every call. cacheTempResources reaches the block
+   * render target, the PBO and the FBO, but not this, the largest of the four.
+   *
+   * Keyed on the shape, and a pooled texture is never resized: its storage is IMMUTABLE
+   * (texStorage2D), so a second texStorage2D on it is INVALID_OPERATION and a silent no-op --
+   * the texture would keep its first shape and the encode proceed against the wrong one.
+   *
+   * That is also why the caller must SKIP texStorage2D for a pooled texture rather than let
+   * it no-op harmlessly: even when the shape matches, the call still raises
+   * INVALID_OPERATION into the context's single shared error queue, once per pool hit.
+   * Whoever reads gl.getError() next inherits it and blames their own last call.
+   *
+   * The copy is ALWAYS allocated with a full mip chain, whatever this encode's mipmapCount
+   * is, and that is what lets the key be the shape alone -- mipmapCount follows
+   * options.generateMipmaps rather than the dimensions, so the same WxH can be asked for with
+   * eleven levels or with one. Putting the count in the key would work too, but it makes the
+   * key depend on a per-call flag. The chain costs 4/3 of level 0 on encodes that did not ask
+   * for mips, and buys a key that cannot move.
+   *
+   * At most one texture is retained per shape. freeTempResources() drops them all.
+   */
+  #acquireSrcTexture(width, height) {
+    if (this.#cacheTempResources) {
+      const free = this.#srcPool.get(`${width}x${height}`)
+      if (free && free.length > 0) {
+        this.#srcServed++
+        const texture = free.pop()
+        return { texture, pooled: true }
+      }
+    }
+    this.#srcAllocated++
+    return { texture: this.#gl.createTexture(), pooled: false }
+  }
+
+  /** Return a source copy to the pool, or delete it when pooling is off. */
+  #releaseSrcTexture(texture, width, height) {
+    if (!this.#cacheTempResources) {
+      this.#gl.deleteTexture(texture)
+      return
+    }
+    const key = `${width}x${height}`
+    let free = this.#srcPool.get(key)
+    if (!free) {
+      free = []
+      this.#srcPool.set(key, free)
+    }
+    // One per shape. encodeTexture holds exactly one source copy at a time, so a second is
+    // only ever reachable through concurrent calls -- and retaining an 85 MB texture on the
+    // chance of an overlap is the wrong trade for the thing this pool exists to reduce.
+    if (free.length >= 1) {
+      this.#gl.deleteTexture(texture)
+      return
+    }
+    free.push(texture)
+  }
+
+  /**
+   * How the source-copy pool is doing: `served` from the pool, `allocated` fresh, and the
+   * shapes currently retained.
+   *
+   * Worth exposing rather than keeping internal: a pool that is keyed wrongly still reports
+   * a high hit rate while handing back textures of the wrong shape, and served-vs-shapes is
+   * what makes that visible from outside.
+   */
+  getTempResourceStats() {
+    return {
+      srcServed: this.#srcServed,
+      srcAllocated: this.#srcAllocated,
+      srcShapes: [...this.#srcPool.entries()].map(([key, free]) => ({ key, retained: free.length })),
+    }
   }
 
   /**
@@ -445,6 +532,31 @@ export class SparkGL {
       gl.deleteFramebuffer(this.#cachedFbo)
       this.#cachedFbo = null
     }
+
+    for (const free of this.#srcPool.values()) {
+      for (const texture of free) gl.deleteTexture(texture)
+    }
+    this.#srcPool.clear()
+  }
+
+  /**
+   * Levels a complete chain has for this size, down to a 4x4 tail.
+   *
+   * One definition, used by the encode AND by the source copy, which no longer agree by
+   * accident: the copy is always allocated with the full chain (see #acquireSrcTexture) while
+   * the encode may be asked for a single level.
+   */
+  static #fullMipCount(width, height) {
+    const MIN_MIP_SIZE = 4
+    let count = 1
+    let w = width
+    let h = height
+    while (w > MIN_MIP_SIZE || h > MIN_MIP_SIZE) {
+      count++
+      w = Math.max(1, Math.floor(w / 2))
+      h = Math.max(1, Math.floor(h / 2))
+    }
+    return count
   }
 
   #isFormatSupported(format) {
@@ -606,27 +718,26 @@ export class SparkGL {
 
     // Determine mipmap count
     const generateMipmaps = options.generateMipmaps || options.mips
-    let mipmapCount = 1
-    if (generateMipmaps) {
-      const MIN_MIP_SIZE = 4
-      let w = width
-      let h = height
-      while (w > MIN_MIP_SIZE || h > MIN_MIP_SIZE) {
-        mipmapCount++
-        w = Math.max(1, Math.floor(w / 2))
-        h = Math.max(1, Math.floor(h / 2))
-      }
-    }
+    const mipmapCount = generateMipmaps ? SparkGL.#fullMipCount(width, height) : 1
 
-    // Create input texture
-    const srcTexture = gl.createTexture()
+    // Create input texture (pooled by shape -- see #acquireSrcTexture)
+    const { texture: srcTexture, pooled: srcPooled } = this.#acquireSrcTexture(width, height)
     gl.bindTexture(gl.TEXTURE_2D, srcTexture)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
 
-    gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, gl.RGBA8, width, height)
+    // The FULL chain, not this encode's mipmapCount -- see #acquireSrcTexture for why the
+    // level count is deliberately not part of the pool key.
+    //
+    // A pooled texture already has exactly this storage -- the pool is keyed on the shape,
+    // never resizes, and every entry was allocated with the same rule -- and storage is
+    // immutable, so asking again is INVALID_OPERATION and a no-op. Harmless to the pixels,
+    // not harmless to the error queue: see #acquireSrcTexture.
+    if (!srcPooled) {
+      gl.texStorage2D(gl.TEXTURE_2D, SparkGL.#fullMipCount(width, height), gl.RGBA8, width, height)
+    }
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, image)
 
 
@@ -698,7 +809,7 @@ export class SparkGL {
       gl.deleteShader(fsShader)
       gl.deleteProgram(flipProgram)
       gl.deleteFramebuffer(flipFbo)
-      gl.deleteTexture(srcTexture)
+      this.#releaseSrcTexture(srcTexture, width, height)
 
       encodeSrcTexture = flippedTexture
     }
@@ -884,7 +995,14 @@ export class SparkGL {
       gl.deleteBuffer(dstBuffer)
       gl.deleteFramebuffer(fbo)
     }
-    gl.deleteTexture(encodeSrcTexture)
+    // Only the pooled source copy goes back to the pool. Under flipY the encode read from
+    // `flippedTexture`, which has IMMUTABLE storage and could never be re-specified for a
+    // later encode -- pooling it would be the silent-no-op bug this pool is keyed to avoid.
+    if (encodeSrcTexture === srcTexture) {
+      this.#releaseSrcTexture(encodeSrcTexture, width, height)
+    } else {
+      gl.deleteTexture(encodeSrcTexture)
+    }
 
     // Restore GL state
     gl.bindFramebuffer(gl.FRAMEBUFFER, savedState.framebuffer)

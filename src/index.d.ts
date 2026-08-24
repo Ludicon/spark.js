@@ -348,6 +348,16 @@ export class SparkGL {
    * Call this when you're done encoding textures to free up GPU memory.
    */
   freeTempResources(): void
+
+  /**
+   * Source-copy pool statistics: how many were served from the pool, how many allocated
+   * fresh, and which shapes are currently retained.
+   *
+   * A pool keyed on the wrong thing still reports a high hit rate while handing back
+   * textures of the wrong shape — `srcServed` next to `srcShapes` is what makes that
+   * visible from outside.
+   */
+  getTempResourceStats(): { srcServed: number; srcAllocated: number; srcShapes: { key: string; retained: number }[] }
 }
 
 export default Spark
