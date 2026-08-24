@@ -114,7 +114,33 @@ export interface SparkEncodeOptions {
    * - For Spark: pass the `GPUTexture` returned by a prior `encodeTexture()`.
    * - For SparkGL: pass the result object returned by a prior `encodeTexture()`.
    */
-  outputTexture?: GPUTexture | SparkGLTextureResult
+  outputTexture?: GPUTexture | SparkGLReusableOutput
+
+  /**
+   * Write the encode into level `outputBaseLevel`.. of `outputTexture` instead of level 0.
+   *
+   * `outputTexture` must then be this encode shifted up by that many levels: its dimensions
+   * `width << outputBaseLevel` x `height << outputBaseLevel`, at least
+   * `mipmapCount + outputBaseLevel` levels, same format. A mismatch throws rather than
+   * quietly allocating a fresh texture, because the caller asked for a specific destination.
+   *
+   * Sampler state on a caller-supplied `outputTexture` is left untouched.
+   *
+   * @default 0
+   */
+  outputBaseLevel?: number
+
+  /**
+   * Encode only levels `[first, last]` of the mip chain, inclusive.
+   *
+   * Levels outside the window cost no draw, no readback and no upload. Use it to fill a
+   * pyramid in more than one pass without re-encoding what a previous pass already wrote.
+   * The source's own mip chain is still generated in full, since level `first` has to exist
+   * before it can be encoded.
+   *
+   * @default the whole chain
+   */
+  levelRange?: [number, number]
 }
 
 /**
@@ -212,6 +238,31 @@ export interface SparkGLCreateOptions {
   cacheTempResources?: boolean
 
   /**
+   * HINT: the largest texture this session expects to encode, in TEXELS (e.g. `4096`).
+   *
+   * A hint and not a limit — an encode larger than it still grows the target rather than
+   * being refused. What it changes is WHEN the target reaches its final size, not how big it
+   * is allowed to get, which is why the name says hint.
+   *
+   * The cached render target holds encoded BLOCKS, so it needs `ceil(size/4)` texels a side,
+   * and it only ever grows. A caller that encodes a small texture before a large one
+   * therefore pays twice: the first encode sizes the target to fit itself, the second finds
+   * it too small, deletes it and allocates again. That is the ordinary shape of a progressive
+   * loader — a small preview, then the full-resolution image — and not something the caller
+   * can reorder its way out of.
+   *
+   * Declaring the ceiling here allocates the target once, at the size the grow path would
+   * have reached anyway. Nothing else changes: the encode drives the viewport and the
+   * readback from the current mip's own block extents, so a target larger than the encode
+   * needs has always been legal.
+   *
+   * Only meaningful together with `cacheTempResources` — without it there is no cached target
+   * to size. An encode larger than the ceiling still grows the target rather than failing:
+   * this is a statement about the common case, not a limit.
+   */
+  hintMaxTmpCacheResolution?: number
+
+  /**
    * Enable verbose logging for debugging.
    * @default false
    */
@@ -228,6 +279,24 @@ export interface SparkGLCreateOptions {
 /**
  * Result object returned by SparkGL.encodeTexture()
  */
+/**
+ * What `outputTexture` actually needs to be.
+ *
+ * A previous `encodeTexture` result satisfies it, which is the common case, but a caller that
+ * owns its own texture — a progressive loader filling one pyramid across several passes — has
+ * no result object to hand back. Requiring the whole result would force it to invent
+ * `byteLength`, `srgb` and a format name that the reuse test never reads.
+ */
+export interface SparkGLReusableOutput {
+  texture: WebGLTexture
+  width: number
+  height: number
+  /** GL internal format the storage was allocated with. */
+  format: number
+  /** Levels the storage HAS, which may exceed what this encode writes. */
+  mipmapCount: number
+}
+
 export interface SparkGLTextureResult {
   /**
    * The compressed WebGL texture
@@ -258,6 +327,19 @@ export interface SparkGLTextureResult {
    * Number of mipmap levels
    */
   mipmapCount: number
+
+  /**
+   * How many levels this call actually encoded. Equal to `mipmapCount` unless `levelRange`
+   * narrowed the window — read this, not `mipmapCount`, to know what was written.
+   */
+  levelsWritten?: number
+
+  /** First and last level encoded, in this encode's own numbering. */
+  firstLevel?: number
+  lastLevel?: number
+
+  /** Level of `outputTexture` that `firstLevel` was written to. 0 unless asked otherwise. */
+  outputBaseLevel?: number
 
   /**
    * Whether the texture is encoded in an sRGB format
@@ -316,6 +398,26 @@ export class SparkGL {
    * Call this when you're done encoding textures to free up GPU memory.
    */
   freeTempResources(): void
+
+  /**
+   * Restate `hintMaxTmpCacheResolution` after construction.
+   *
+   * A session that outlives the thing it encodes — one encoder, many models — knows the
+   * device's limits at construction but not the content's, and sizing from the device cap is
+   * the expensive mistake. Takes effect the next time the cached target is allocated or
+   * grown; it deliberately does not reallocate an existing one. `0` restores grow-to-fit.
+   */
+  setHintMaxTmpCacheResolution(resolution: number): void
+
+  /**
+   * Source-copy pool statistics: how many were served from the pool, how many allocated
+   * fresh, and which shapes are currently retained.
+   *
+   * A pool keyed on the wrong thing still reports a high hit rate while handing back
+   * textures of the wrong shape — `srcServed` next to `srcShapes` is what makes that
+   * visible from outside.
+   */
+  getTempResourceStats(): { srcServed: number; srcAllocated: number; srcShapes: { key: string; retained: number }[] }
 }
 
 export default Spark

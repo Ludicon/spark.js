@@ -305,12 +305,26 @@ export class SparkGL {
   // Cached temporary resources for encodeTexture
   #cachedBuffer = null
   #cachedBufferSize = 0
+  /**
+   * Free source copies, keyed by exact shape ("WxH"). See #acquireSrcTexture.
+   *
+   * Separate from the #cachedTexture8/16 pair below because it answers a different question.
+   * Those are ONE render target that grows to fit the largest encode; this is a set, because
+   * a caller encoding a 4096 and a 256 needs both shapes and neither can stand in for the
+   * other — the encode reads the source with texelFetch at its own dimensions.
+   */
+  #srcPool = new Map()
+  #srcServed = 0
+  #srcAllocated = 0
   #cachedTexture8 = null // For 8-byte per block formats
   #cachedTexture8Width = 0
   #cachedTexture8Height = 0
   #cachedTexture16 = null // For 16-byte per block formats
   #cachedTexture16Width = 0
   #cachedTexture16Height = 0
+  // Block-grid side for the cached render target's first allocation, from
+  // options.hintMaxTmpCacheResolution. 0 = size it to the first encode and grow.
+  #maxCacheBlocks = 0
   #cachedFbo = null
 
   constructor(gl, options = {}) {
@@ -321,6 +335,9 @@ export class SparkGL {
     this.#verbose = options.verbose ?? false
     this.#validateShaders = options.validateShaders ?? false
     this.#cacheTempResources = options.cacheTempResources ?? false
+    // In TEXELS at the API boundary -- that is the number a caller knows about its own images
+    // -- converted once to the block grid the render target is actually measured in.
+    this.setHintMaxTmpCacheResolution(options.hintMaxTmpCacheResolution ?? 0)
     this.#supportedFormats = detectWebGLFormats(gl, this.#verbose)
 
     // Handle preload option
@@ -331,15 +348,132 @@ export class SparkGL {
   dispose() {
     const gl = this.#gl
 
+    // Scratch first, and unconditionally: #programs holds PROMISES (see #loadProgram), so
+    // the loop below used to hand a Promise to gl.deleteProgram and throw before ever
+    // reaching this call -- leaving the buffer, render target and FBO alive for the lifetime
+    // of the context.
+    this.freeTempResources()
+
     if (this.#fullscreenVertexShader) {
       gl.deleteShader(this.#fullscreenVertexShader)
     }
-    for (const program of this.#programs) {
-      gl.deleteProgram(program)
+    for (const entry of this.#programs) {
+      if (!entry) continue
+      // A program may still be compiling. Resolve first, and swallow a rejected load: a
+      // shader that failed to compile has nothing to delete, and dispose() must not be the
+      // place that surfaces it.
+      Promise.resolve(entry).then(
+        (program) => { if (program) gl.deleteProgram(program) },
+        () => {},
+      )
     }
+    this.#programs = []
+  }
 
-    // Clean up cached temporary resources
-    this.freeTempResources()
+  /**
+   * Take a source-copy texture of this shape from the pool, or make one.
+   *
+   * The source copy is a full RGBA8 mip chain of the image being encoded -- 85 MB for a 4096
+   * -- and it was created and deleted on every call. cacheTempResources reaches the block
+   * render target, the PBO and the FBO, but not this, the largest of the four.
+   *
+   * Keyed on the shape, and a pooled texture is never resized: its storage is IMMUTABLE
+   * (texStorage2D), so a second texStorage2D on it is INVALID_OPERATION and a silent no-op --
+   * the texture would keep its first shape and the encode proceed against the wrong one.
+   *
+   * That is also why the caller must SKIP texStorage2D for a pooled texture rather than let
+   * it no-op harmlessly: even when the shape matches, the call still raises
+   * INVALID_OPERATION into the context's single shared error queue, once per pool hit.
+   * Whoever reads gl.getError() next inherits it and blames their own last call.
+   *
+   * The copy is ALWAYS allocated with a full mip chain, whatever this encode's mipmapCount
+   * is, and that is what lets the key be the shape alone -- mipmapCount follows
+   * options.generateMipmaps rather than the dimensions, so the same WxH can be asked for with
+   * eleven levels or with one. Putting the count in the key would work too, but it makes the
+   * key depend on a per-call flag. The chain costs 4/3 of level 0 on encodes that did not ask
+   * for mips, and buys a key that cannot move.
+   *
+   * At most one texture is retained per shape. freeTempResources() drops them all.
+   */
+  #acquireSrcTexture(width, height) {
+    const gl = this.#gl
+    if (this.#cacheTempResources) {
+      const free = this.#srcPool.get(`${width}x${height}`)
+      if (free && free.length > 0) {
+        this.#srcServed++
+        const texture = free.pop()
+        // Hand back a texture in the state a FRESH one would be in.
+        //
+        // TEXTURE_BASE_LEVEL is the one parameter the encode loop dirties and nobody
+        // repairs: it is set to the level being encoded and left at the last one. A freshly
+        // created texture starts at 0, which is why nothing here ever had to set it --
+        // pooling is what breaks that assumption. Left at 10, the next generateMipmap
+        // sources from level 10 and derives nothing below it, so levels 1..9 keep the
+        // PREVIOUS image's content. Clearing them would not help: they are regenerated, but
+        // only from BASE_LEVEL up.
+        gl.bindTexture(gl.TEXTURE_2D, texture)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, 0)
+        return { texture, pooled: true }
+      }
+    }
+    this.#srcAllocated++
+    return { texture: gl.createTexture(), pooled: false }
+  }
+
+  /**
+   * Restate the hint after construction, for a session that outlives what it encodes: it
+   * knows the DEVICE's limits when it is built and the CONTENT's only later, and sizing from
+   * the device cap is the expensive mistake.
+   *
+   * Applies the next time the target is allocated or grown, which is soon enough -- the
+   * target is lazy. Deliberately does not reallocate an existing one: an encode may be
+   * reading it.
+   *
+   * @param {number} resolution - Largest texture to be encoded, in texels. 0 = grow to fit.
+   */
+  setHintMaxTmpCacheResolution(resolution) {
+    if (resolution > 0 && !Number.isFinite(resolution)) {
+      throw new Error(`hintMaxTmpCacheResolution must be a finite number of texels, got ${resolution}`)
+    }
+    this.#maxCacheBlocks = resolution > 0 ? Math.ceil(resolution / 4) : 0
+  }
+
+  /** Return a source copy to the pool, or delete it when pooling is off. */
+  #releaseSrcTexture(texture, width, height) {
+    if (!this.#cacheTempResources) {
+      this.#gl.deleteTexture(texture)
+      return
+    }
+    const key = `${width}x${height}`
+    let free = this.#srcPool.get(key)
+    if (!free) {
+      free = []
+      this.#srcPool.set(key, free)
+    }
+    // One per shape. encodeTexture holds exactly one source copy at a time, so a second is
+    // only ever reachable through concurrent calls -- and retaining an 85 MB texture on the
+    // chance of an overlap is the wrong trade for the thing this pool exists to reduce.
+    if (free.length >= 1) {
+      this.#gl.deleteTexture(texture)
+      return
+    }
+    free.push(texture)
+  }
+
+  /**
+   * How the source-copy pool is doing: `served` from the pool, `allocated` fresh, and the
+   * shapes currently retained.
+   *
+   * Worth exposing rather than keeping internal: a pool that is keyed wrongly still reports
+   * a high hit rate while handing back textures of the wrong shape, and served-vs-shapes is
+   * what makes that visible from outside.
+   */
+  getTempResourceStats() {
+    return {
+      srcServed: this.#srcServed,
+      srcAllocated: this.#srcAllocated,
+      srcShapes: [...this.#srcPool.entries()].map(([key, free]) => ({ key, retained: free.length })),
+    }
   }
 
   /**
@@ -349,6 +483,7 @@ export class SparkGL {
    * @param {boolean|string[]} options.preload - Whether to preload all encoder pipelines, or an array of format names to preload (false by default).
    * @param {boolean} options.verbose - Whether to enable verbose logging (false by default).
    * @param {boolean} options.cacheTempResources - Whether to cache temporary resources for reuse across encodeTexture calls (false by default).
+   * @param {number} options.hintMaxTmpCacheResolution - HINT: the largest texture this session expects to encode, in texels. The cached render target is allocated at that size on its first use instead of growing to fit, which removes the reallocation a small-then-large sequence would otherwise cause. It is not a limit -- an encode larger than the hint still grows the target rather than failing. Only meaningful with cacheTempResources.
    * @returns {SparkGL} A new SparkGL instance.
    */
   static create(gl, options = {}) {
@@ -434,6 +569,31 @@ export class SparkGL {
       gl.deleteFramebuffer(this.#cachedFbo)
       this.#cachedFbo = null
     }
+
+    for (const free of this.#srcPool.values()) {
+      for (const texture of free) gl.deleteTexture(texture)
+    }
+    this.#srcPool.clear()
+  }
+
+  /**
+   * Levels a complete chain has for this size, down to a 4x4 tail.
+   *
+   * One definition, used by the encode AND by the source copy, which no longer agree by
+   * accident: the copy is always allocated with the full chain (see #acquireSrcTexture) while
+   * the encode may be asked for a single level.
+   */
+  static #fullMipCount(width, height) {
+    const MIN_MIP_SIZE = 4
+    let count = 1
+    let w = width
+    let h = height
+    while (w > MIN_MIP_SIZE || h > MIN_MIP_SIZE) {
+      count++
+      w = Math.max(1, Math.floor(w / 2))
+      h = Math.max(1, Math.floor(h / 2))
+    }
+    return count
   }
 
   #isFormatSupported(format) {
@@ -595,27 +755,26 @@ export class SparkGL {
 
     // Determine mipmap count
     const generateMipmaps = options.generateMipmaps || options.mips
-    let mipmapCount = 1
-    if (generateMipmaps) {
-      const MIN_MIP_SIZE = 4
-      let w = width
-      let h = height
-      while (w > MIN_MIP_SIZE || h > MIN_MIP_SIZE) {
-        mipmapCount++
-        w = Math.max(1, Math.floor(w / 2))
-        h = Math.max(1, Math.floor(h / 2))
-      }
-    }
+    const mipmapCount = generateMipmaps ? SparkGL.#fullMipCount(width, height) : 1
 
-    // Create input texture
-    const srcTexture = gl.createTexture()
+    // Create input texture (pooled by shape -- see #acquireSrcTexture)
+    const { texture: srcTexture, pooled: srcPooled } = this.#acquireSrcTexture(width, height)
     gl.bindTexture(gl.TEXTURE_2D, srcTexture)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
 
-    gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, gl.RGBA8, width, height)
+    // The FULL chain, not this encode's mipmapCount -- see #acquireSrcTexture for why the
+    // level count is deliberately not part of the pool key.
+    //
+    // A pooled texture already has exactly this storage -- the pool is keyed on the shape,
+    // never resizes, and every entry was allocated with the same rule -- and storage is
+    // immutable, so asking again is INVALID_OPERATION and a no-op. Harmless to the pixels,
+    // not harmless to the error queue: see #acquireSrcTexture.
+    if (!srcPooled) {
+      gl.texStorage2D(gl.TEXTURE_2D, SparkGL.#fullMipCount(width, height), gl.RGBA8, width, height)
+    }
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, image)
 
 
@@ -687,7 +846,7 @@ export class SparkGL {
       gl.deleteShader(fsShader)
       gl.deleteProgram(flipProgram)
       gl.deleteFramebuffer(flipFbo)
-      gl.deleteTexture(srcTexture)
+      this.#releaseSrcTexture(srcTexture, width, height)
 
       encodeSrcTexture = flippedTexture
     }
@@ -703,12 +862,28 @@ export class SparkGL {
     // Create or reuse output compressed texture. The caller can pass a previous
     // encodeTexture() result object as options.outputTexture; it is reused only when
     // dimensions, format, and mipmap count match.
-    const reuseOutput =
+    //
+    // options.outputBaseLevel lets that texture be LARGER than this encode: the result is
+    // written starting at that level of the caller's pyramid instead of at level 0, so a
+    // caller filling one pyramid in several passes can reuse it from the first, small pass
+    // instead of having spark allocate a whole pyramid it throws away.
+    const outputBaseLevel = options.outputBaseLevel | 0
+    const reuseOutput = Boolean(
       options.outputTexture &&
-      options.outputTexture.width === width &&
-      options.outputTexture.height === height &&
-      options.outputTexture.mipmapCount === mipmapCount &&
-      options.outputTexture.format === glFormat
+      options.outputTexture.format === glFormat &&
+      options.outputTexture.width === width << outputBaseLevel &&
+      options.outputTexture.height === height << outputBaseLevel &&
+      options.outputTexture.mipmapCount >= mipmapCount + outputBaseLevel
+    )
+    if (options.outputTexture && !reuseOutput && outputBaseLevel !== 0) {
+      throw new Error(
+        `outputBaseLevel ${outputBaseLevel} needs an outputTexture of ` +
+        `${width << outputBaseLevel}x${height << outputBaseLevel} with at least ` +
+        `${mipmapCount + outputBaseLevel} levels in format 0x${glFormat.toString(16)}; got ` +
+        `${options.outputTexture.width}x${options.outputTexture.height} with ` +
+        `${options.outputTexture.mipmapCount} levels in format 0x${(options.outputTexture.format | 0).toString(16)}`
+      )
+    }
 
     const compressedTexture = reuseOutput ? options.outputTexture.texture : gl.createTexture()
     gl.bindTexture(gl.TEXTURE_2D, compressedTexture)
@@ -716,18 +891,25 @@ export class SparkGL {
       gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, glFormat, width, height)
     }
 
-    // Set texture filtering parameters
-    if (generateMipmaps) {
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    } else {
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    }
+    // Sampler state belongs to whoever owns the texture. When the caller supplied it, spark
+    // has already declined to allocate its storage; overwriting its filters and wrap modes
+    // would be the same trespass. A caller reusing its own texture has usually set both from
+    // the source material, and a progressive loader drives TEXTURE_BASE_LEVEL / MIN_LOD on
+    // it between passes -- resetting those mid-stream is visible on screen.
+    if (!reuseOutput) {
+      // Set texture filtering parameters
+      if (generateMipmaps) {
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+      } else {
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+      }
 
-    // Set texture wrapping mode (as determined above)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
+      // Set texture wrapping mode (as determined above)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
+    }
 
     const bw = Math.ceil(width / 4)
     const bh = Math.ceil(height / 4)
@@ -760,6 +942,11 @@ export class SparkGL {
 
     // Create or reuse render target (uint) texture.
     // Need different textures for 8-byte and 16-byte per block formats.
+    //
+    // allocW/allocH honour the size hint: with one declared, the target is allocated at that
+    // size the first time instead of growing into it over several encodes.
+    const allocW = cacheTempResources ? Math.max(bw, this.#maxCacheBlocks) : bw
+    const allocH = cacheTempResources ? Math.max(bh, this.#maxCacheBlocks) : bh
     let mipDstTexture
 
     if (blockSize === 8) {
@@ -773,11 +960,11 @@ export class SparkGL {
         }
         mipDstTexture = gl.createTexture()
         gl.bindTexture(gl.TEXTURE_2D, mipDstTexture)
-        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, bw, bh)
+        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, allocW, allocH)
         if (cacheTempResources) {
           this.#cachedTexture8 = mipDstTexture
-          this.#cachedTexture8Width = bw
-          this.#cachedTexture8Height = bh
+          this.#cachedTexture8Width = allocW
+          this.#cachedTexture8Height = allocH
         }
       }
     } else {
@@ -791,11 +978,11 @@ export class SparkGL {
         }
         mipDstTexture = gl.createTexture()
         gl.bindTexture(gl.TEXTURE_2D, mipDstTexture)
-        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, bw, bh)
+        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, allocW, allocH)
         if (cacheTempResources) {
           this.#cachedTexture16 = mipDstTexture
-          this.#cachedTexture16Width = bw
-          this.#cachedTexture16Height = bh
+          this.#cachedTexture16Width = allocW
+          this.#cachedTexture16Height = allocH
         }
       }
     }
@@ -819,14 +1006,27 @@ export class SparkGL {
     // Setup rendering state
     gl.useProgram(program)
 
-    // Encode each mipmap level
-    for (let mipLevel = 0; mipLevel < mipmapCount; mipLevel++) {
+    // Encode each mipmap level. options.levelRange = [first, last] restricts that to a
+    // window; a skipped level costs no draw, no readback and no upload. The point is to stop
+    // re-encoding levels the caller already has -- filling one pyramid in two passes
+    // otherwise re-encodes the whole chain on the second and throws most of it away.
+    //
+    // The source's chain is still generated in full above: level `first` has to exist first.
+    const firstLevel = Math.max(0, options.levelRange ? options.levelRange[0] | 0 : 0)
+    const lastLevel = Math.min(mipmapCount - 1, options.levelRange ? options.levelRange[1] | 0 : mipmapCount - 1)
+    if (firstLevel > lastLevel) {
+      throw new Error(`levelRange [${firstLevel}, ${lastLevel}] selects no level of a ${mipmapCount}-level encode`)
+    }
+    let levelsWritten = 0
+
+    for (let mipLevel = firstLevel; mipLevel <= lastLevel; mipLevel++) {
       const mipWidth = Math.max(1, Math.floor(width >> mipLevel))
       const mipHeight = Math.max(1, Math.floor(height >> mipLevel))
       const mipBw = Math.ceil(mipWidth / 4)
       const mipBh = Math.ceil(mipHeight / 4)
       const mipSize = blockSize * mipBw * mipBh
       byteLength += mipSize
+      levelsWritten++
 
       // Bind input texture at current mip level
       gl.bindTexture(gl.TEXTURE_2D, encodeSrcTexture)
@@ -841,7 +1041,7 @@ export class SparkGL {
 
       // Copy pixel buffer object to compressed texture at the curent mip level
       gl.bindTexture(gl.TEXTURE_2D, compressedTexture)
-      gl.compressedTexSubImage2D(gl.TEXTURE_2D, mipLevel, 0, 0, mipWidth, mipHeight, glFormat, mipSize, 0)
+      gl.compressedTexSubImage2D(gl.TEXTURE_2D, mipLevel + outputBaseLevel, 0, 0, mipWidth, mipHeight, glFormat, mipSize, 0)
     }
 
     // Cleanup temporary resources (unless cached)
@@ -850,7 +1050,14 @@ export class SparkGL {
       gl.deleteBuffer(dstBuffer)
       gl.deleteFramebuffer(fbo)
     }
-    gl.deleteTexture(encodeSrcTexture)
+    // Only the pooled source copy goes back to the pool. Under flipY the encode read from
+    // `flippedTexture`, which has IMMUTABLE storage and could never be re-specified for a
+    // later encode -- pooling it would be the silent-no-op bug this pool is keyed to avoid.
+    if (encodeSrcTexture === srcTexture) {
+      this.#releaseSrcTexture(encodeSrcTexture, width, height)
+    } else {
+      gl.deleteTexture(encodeSrcTexture)
+    }
 
     // Restore GL state
     gl.bindFramebuffer(gl.FRAMEBUFFER, savedState.framebuffer)
@@ -889,7 +1096,14 @@ export class SparkGL {
       sparkFormat: SparkFormatName[format],
       srgb,
       mipmapCount,
-      byteLength
+      byteLength,
+      // Which levels this encode actually wrote, and where they landed in the output
+      // texture. Under levelRange these are not mipmapCount levels starting at 0, and a
+      // caller that reads mipmapCount alone would believe it has levels nobody encoded.
+      levelsWritten,
+      firstLevel,
+      lastLevel,
+      outputBaseLevel
     }
 
     return textureObject
