@@ -306,9 +306,11 @@ export class SparkGL {
   #cachedBuffer = null
   #cachedBufferSize = 0
   #cachedTexture8 = null // For 8-byte per block formats
+  #cachedTexture8Width = 0
+  #cachedTexture8Height = 0
   #cachedTexture16 = null // For 16-byte per block formats
-  #cachedTextureWidth = 0
-  #cachedTextureHeight = 0
+  #cachedTexture16Width = 0
+  #cachedTexture16Height = 0
   #cachedFbo = null
 
   constructor(gl, options = {}) {
@@ -417,20 +419,21 @@ export class SparkGL {
     if (this.#cachedTexture8) {
       gl.deleteTexture(this.#cachedTexture8)
       this.#cachedTexture8 = null
+      this.#cachedTexture8Width = 0
+      this.#cachedTexture8Height = 0
     }
 
     if (this.#cachedTexture16) {
       gl.deleteTexture(this.#cachedTexture16)
       this.#cachedTexture16 = null
+      this.#cachedTexture16Width = 0
+      this.#cachedTexture16Height = 0
     }
 
     if (this.#cachedFbo) {
       gl.deleteFramebuffer(this.#cachedFbo)
       this.#cachedFbo = null
     }
-
-    this.#cachedTextureWidth = 0
-    this.#cachedTextureHeight = 0
   }
 
   #isFormatSupported(format) {
@@ -757,9 +760,10 @@ export class SparkGL {
     // Create or reuse render target (uint) texture.
     // Need different textures for 8-byte and 16-byte per block formats.
     let mipDstTexture
-    const needsRealloc = !cacheTempResources || this.#cachedTextureWidth < width || this.#cachedTextureHeight < height
 
     if (blockSize === 8) {
+      const needsRealloc = !cacheTempResources || this.#cachedTexture8Width < bw || this.#cachedTexture8Height < bh
+
       if (cacheTempResources && this.#cachedTexture8 && !needsRealloc) {
         mipDstTexture = this.#cachedTexture8
       } else {
@@ -768,14 +772,16 @@ export class SparkGL {
         }
         mipDstTexture = gl.createTexture()
         gl.bindTexture(gl.TEXTURE_2D, mipDstTexture)
-        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, width, height)
+        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, bw, bh)
         if (cacheTempResources) {
           this.#cachedTexture8 = mipDstTexture
-          this.#cachedTextureWidth = width
-          this.#cachedTextureHeight = height
+          this.#cachedTexture8Width = bw
+          this.#cachedTexture8Height = bh
         }
       }
     } else {
+      const needsRealloc = !cacheTempResources || this.#cachedTexture16Width < bw || this.#cachedTexture16Height < bh
+
       if (cacheTempResources && this.#cachedTexture16 && !needsRealloc) {
         mipDstTexture = this.#cachedTexture16
       } else {
@@ -784,11 +790,11 @@ export class SparkGL {
         }
         mipDstTexture = gl.createTexture()
         gl.bindTexture(gl.TEXTURE_2D, mipDstTexture)
-        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, width, height)
+        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, bw, bh)
         if (cacheTempResources) {
           this.#cachedTexture16 = mipDstTexture
-          this.#cachedTextureWidth = width
-          this.#cachedTextureHeight = height
+          this.#cachedTexture16Width = bw
+          this.#cachedTexture16Height = bh
         }
       }
     }
