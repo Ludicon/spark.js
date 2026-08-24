@@ -313,6 +313,10 @@ export class SparkGL {
   #cachedTexture16Width = 0
   #cachedTexture16Height = 0
   #cachedFbo = null
+  #cachedSrcTexture = null // RGBA8 copy of the source image
+  #cachedSrcWidth = 0
+  #cachedSrcHeight = 0
+  #cachedSrcMipLevelCount = 0
 
   constructor(gl, options = {}) {
     if (!gl) {
@@ -448,6 +452,14 @@ export class SparkGL {
     if (this.#cachedFbo) {
       gl.deleteFramebuffer(this.#cachedFbo)
       this.#cachedFbo = null
+    }
+
+    if (this.#cachedSrcTexture) {
+      gl.deleteTexture(this.#cachedSrcTexture)
+      this.#cachedSrcTexture = null
+      this.#cachedSrcWidth = 0
+      this.#cachedSrcHeight = 0
+      this.#cachedSrcMipLevelCount = 0
     }
   }
 
@@ -628,16 +640,41 @@ export class SparkGL {
       }
     }
 
-    // Create input texture
-    const srcTexture = gl.createTexture()
-    gl.bindTexture(gl.TEXTURE_2D, srcTexture)
+    const cacheTempResources = this.#cacheTempResources
+
+    // Create or reuse input texture. A cached texture is reused when it is at least as large
+    // as the image and has at least as many mip levels; the encoder only reads the region
+    // covered by the image, so a larger texture is fine.
+    let srcTexture
+    const needsSrcRealloc =
+      !cacheTempResources ||
+      !this.#cachedSrcTexture ||
+      this.#cachedSrcWidth < width ||
+      this.#cachedSrcHeight < height ||
+      this.#cachedSrcMipLevelCount < mipmapCount
+
+    if (!needsSrcRealloc) {
+      srcTexture = this.#cachedSrcTexture
+      gl.bindTexture(gl.TEXTURE_2D, srcTexture)
+    } else {
+      if (cacheTempResources && this.#cachedSrcTexture) {
+        gl.deleteTexture(this.#cachedSrcTexture)
+      }
+      srcTexture = gl.createTexture()
+      gl.bindTexture(gl.TEXTURE_2D, srcTexture)
+      gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, gl.RGBA8, width, height)
+      if (cacheTempResources) {
+        this.#cachedSrcTexture = srcTexture
+        this.#cachedSrcWidth = width
+        this.#cachedSrcHeight = height
+        this.#cachedSrcMipLevelCount = mipmapCount
+      }
+    }
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
-
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, Boolean(options.flipY))
-    gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, gl.RGBA8, width, height)
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, image)
 
     // Generate mipmaps if requested
@@ -681,8 +718,6 @@ export class SparkGL {
     const bh = Math.ceil(height / 4)
     const dstBufferSize = blockSize * bw * bh
     let byteLength = dstBufferSize
-
-    const cacheTempResources = this.#cacheTempResources
 
     // Create or reuse temporary buffer.
     let dstBuffer
@@ -792,13 +827,18 @@ export class SparkGL {
       gl.compressedTexSubImage2D(gl.TEXTURE_2D, mipLevel, 0, 0, mipWidth, mipHeight, glFormat, mipSize, 0)
     }
 
+    // The encode loop leaves TEXTURE_BASE_LEVEL at the last mip level. Reset it so that a
+    // reused source texture generates mipmaps from level 0 on the next encode.
+    gl.bindTexture(gl.TEXTURE_2D, srcTexture)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, 0)
+
     // Cleanup temporary resources (unless cached)
     if (!cacheTempResources) {
       gl.deleteTexture(mipDstTexture)
       gl.deleteBuffer(dstBuffer)
       gl.deleteFramebuffer(fbo)
+      gl.deleteTexture(srcTexture)
     }
-    gl.deleteTexture(srcTexture)
 
     // Restore GL state
     gl.bindFramebuffer(gl.FRAMEBUFFER, savedState.framebuffer)
