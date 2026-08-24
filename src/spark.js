@@ -306,9 +306,7 @@ class Spark {
     // Pipelines and samplers are not destroyable in WebGPU; drop references and let GC reclaim them.
     this.#pipelines = []
 
-    for (let i = 0; i < 3; i++) {
-      this.#uniformBuffer[i].destroy()
-    }
+    this.#uniformBuffer.destroy()
     if (this.#querySet) {
       this.#querySet.destroy()
       this.#queryBuffer.destroy()
