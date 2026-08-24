@@ -241,6 +241,8 @@ spark.freeTempResources()
 
 Destroys the Spark instance and all associated GPU resources.
 
+For `SparkGL`, `dispose()` is asynchronous and resolves once any programs still being compiled have been deleted. Awaiting it is optional.
+
 **Example:**
 
 ```js
