@@ -114,7 +114,21 @@ export interface SparkEncodeOptions {
    * - For Spark: pass the `GPUTexture` returned by a prior `encodeTexture()`.
    * - For SparkGL: pass the result object returned by a prior `encodeTexture()`.
    */
-  outputTexture?: GPUTexture | SparkGLTextureResult
+  outputTexture?: GPUTexture | SparkGLReusableOutput
+
+  /**
+   * Write the encode into level `outputBaseLevel`.. of `outputTexture` instead of level 0.
+   *
+   * `outputTexture` must then be this encode shifted up by that many levels: its dimensions
+   * `width << outputBaseLevel` x `height << outputBaseLevel`, at least
+   * `mipmapCount + outputBaseLevel` levels, same format. A mismatch throws rather than
+   * quietly allocating a fresh texture, because the caller asked for a specific destination.
+   *
+   * Sampler state on a caller-supplied `outputTexture` is left untouched.
+   *
+   * @default 0
+   */
+  outputBaseLevel?: number
 }
 
 /**
@@ -228,6 +242,24 @@ export interface SparkGLCreateOptions {
 /**
  * Result object returned by SparkGL.encodeTexture()
  */
+/**
+ * What `outputTexture` actually needs to be.
+ *
+ * A previous `encodeTexture` result satisfies it, which is the common case, but a caller that
+ * owns its own texture — a progressive loader filling one pyramid across several passes — has
+ * no result object to hand back. Requiring the whole result would force it to invent
+ * `byteLength`, `srgb` and a format name that the reuse test never reads.
+ */
+export interface SparkGLReusableOutput {
+  texture: WebGLTexture
+  width: number
+  height: number
+  /** GL internal format the storage was allocated with. */
+  format: number
+  /** Levels the storage HAS, which may exceed what this encode writes. */
+  mipmapCount: number
+}
+
 export interface SparkGLTextureResult {
   /**
    * The compressed WebGL texture

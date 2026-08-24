@@ -714,12 +714,28 @@ export class SparkGL {
     // Create or reuse output compressed texture. The caller can pass a previous
     // encodeTexture() result object as options.outputTexture; it is reused only when
     // dimensions, format, and mipmap count match.
-    const reuseOutput =
+    //
+    // options.outputBaseLevel lets that texture be LARGER than this encode: the result is
+    // written starting at that level of the caller's pyramid instead of at level 0, so a
+    // caller filling one pyramid in several passes can reuse it from the first, small pass
+    // instead of having spark allocate a whole pyramid it throws away.
+    const outputBaseLevel = options.outputBaseLevel | 0
+    const reuseOutput = Boolean(
       options.outputTexture &&
-      options.outputTexture.width === width &&
-      options.outputTexture.height === height &&
-      options.outputTexture.mipmapCount === mipmapCount &&
-      options.outputTexture.format === glFormat
+      options.outputTexture.format === glFormat &&
+      options.outputTexture.width === width << outputBaseLevel &&
+      options.outputTexture.height === height << outputBaseLevel &&
+      options.outputTexture.mipmapCount >= mipmapCount + outputBaseLevel
+    )
+    if (options.outputTexture && !reuseOutput && outputBaseLevel !== 0) {
+      throw new Error(
+        `outputBaseLevel ${outputBaseLevel} needs an outputTexture of ` +
+        `${width << outputBaseLevel}x${height << outputBaseLevel} with at least ` +
+        `${mipmapCount + outputBaseLevel} levels in format 0x${glFormat.toString(16)}; got ` +
+        `${options.outputTexture.width}x${options.outputTexture.height} with ` +
+        `${options.outputTexture.mipmapCount} levels in format 0x${(options.outputTexture.format | 0).toString(16)}`
+      )
+    }
 
     const compressedTexture = reuseOutput ? options.outputTexture.texture : gl.createTexture()
     gl.bindTexture(gl.TEXTURE_2D, compressedTexture)
@@ -727,18 +743,25 @@ export class SparkGL {
       gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, glFormat, width, height)
     }
 
-    // Set texture filtering parameters
-    if (generateMipmaps) {
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    } else {
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    }
+    // Sampler state belongs to whoever owns the texture. When the caller supplied it, spark
+    // has already declined to allocate its storage; overwriting its filters and wrap modes
+    // would be the same trespass. A caller reusing its own texture has usually set both from
+    // the source material, and a progressive loader drives TEXTURE_BASE_LEVEL / MIN_LOD on
+    // it between passes -- resetting those mid-stream is visible on screen.
+    if (!reuseOutput) {
+      // Set texture filtering parameters
+      if (generateMipmaps) {
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+      } else {
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+      }
 
-    // Set texture wrapping mode (as determined above)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
+      // Set texture wrapping mode (as determined above)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
+    }
 
     const bw = Math.ceil(width / 4)
     const bh = Math.ceil(height / 4)
@@ -852,7 +875,7 @@ export class SparkGL {
 
       // Copy pixel buffer object to compressed texture at the curent mip level
       gl.bindTexture(gl.TEXTURE_2D, compressedTexture)
-      gl.compressedTexSubImage2D(gl.TEXTURE_2D, mipLevel, 0, 0, mipWidth, mipHeight, glFormat, mipSize, 0)
+      gl.compressedTexSubImage2D(gl.TEXTURE_2D, mipLevel + outputBaseLevel, 0, 0, mipWidth, mipHeight, glFormat, mipSize, 0)
     }
 
     // Cleanup temporary resources (unless cached)
@@ -900,7 +923,10 @@ export class SparkGL {
       sparkFormat: SparkFormatName[format],
       srgb,
       mipmapCount,
-      byteLength
+      byteLength,
+      // Where this encode landed in the output texture. A caller that reuses the texture
+      // needs it back to know which levels it now owns.
+      outputBaseLevel
     }
 
     return textureObject
