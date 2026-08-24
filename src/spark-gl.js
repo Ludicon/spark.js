@@ -322,6 +322,9 @@ export class SparkGL {
   #cachedTexture16 = null // For 16-byte per block formats
   #cachedTexture16Width = 0
   #cachedTexture16Height = 0
+  // Block-grid side for the cached render target's first allocation, from
+  // options.hintMaxTmpCacheResolution. 0 = size it to the first encode and grow.
+  #maxCacheBlocks = 0
   #cachedFbo = null
 
   constructor(gl, options = {}) {
@@ -332,6 +335,9 @@ export class SparkGL {
     this.#verbose = options.verbose ?? false
     this.#validateShaders = options.validateShaders ?? false
     this.#cacheTempResources = options.cacheTempResources ?? false
+    // In TEXELS at the API boundary -- that is the number a caller knows about its own images
+    // -- converted once to the block grid the render target is actually measured in.
+    this.setHintMaxTmpCacheResolution(options.hintMaxTmpCacheResolution ?? 0)
     this.#supportedFormats = detectWebGLFormats(gl, this.#verbose)
 
     // Handle preload option
@@ -414,6 +420,24 @@ export class SparkGL {
     return { texture: gl.createTexture(), pooled: false }
   }
 
+  /**
+   * Restate the hint after construction, for a session that outlives what it encodes: it
+   * knows the DEVICE's limits when it is built and the CONTENT's only later, and sizing from
+   * the device cap is the expensive mistake.
+   *
+   * Applies the next time the target is allocated or grown, which is soon enough -- the
+   * target is lazy. Deliberately does not reallocate an existing one: an encode may be
+   * reading it.
+   *
+   * @param {number} resolution - Largest texture to be encoded, in texels. 0 = grow to fit.
+   */
+  setHintMaxTmpCacheResolution(resolution) {
+    if (resolution > 0 && !Number.isFinite(resolution)) {
+      throw new Error(`hintMaxTmpCacheResolution must be a finite number of texels, got ${resolution}`)
+    }
+    this.#maxCacheBlocks = resolution > 0 ? Math.ceil(resolution / 4) : 0
+  }
+
   /** Return a source copy to the pool, or delete it when pooling is off. */
   #releaseSrcTexture(texture, width, height) {
     if (!this.#cacheTempResources) {
@@ -459,6 +483,7 @@ export class SparkGL {
    * @param {boolean|string[]} options.preload - Whether to preload all encoder pipelines, or an array of format names to preload (false by default).
    * @param {boolean} options.verbose - Whether to enable verbose logging (false by default).
    * @param {boolean} options.cacheTempResources - Whether to cache temporary resources for reuse across encodeTexture calls (false by default).
+   * @param {number} options.hintMaxTmpCacheResolution - HINT: the largest texture this session expects to encode, in texels. The cached render target is allocated at that size on its first use instead of growing to fit, which removes the reallocation a small-then-large sequence would otherwise cause. It is not a limit -- an encode larger than the hint still grows the target rather than failing. Only meaningful with cacheTempResources.
    * @returns {SparkGL} A new SparkGL instance.
    */
   static create(gl, options = {}) {
@@ -917,6 +942,11 @@ export class SparkGL {
 
     // Create or reuse render target (uint) texture.
     // Need different textures for 8-byte and 16-byte per block formats.
+    //
+    // allocW/allocH honour the size hint: with one declared, the target is allocated at that
+    // size the first time instead of growing into it over several encodes.
+    const allocW = cacheTempResources ? Math.max(bw, this.#maxCacheBlocks) : bw
+    const allocH = cacheTempResources ? Math.max(bh, this.#maxCacheBlocks) : bh
     let mipDstTexture
 
     if (blockSize === 8) {
@@ -930,11 +960,11 @@ export class SparkGL {
         }
         mipDstTexture = gl.createTexture()
         gl.bindTexture(gl.TEXTURE_2D, mipDstTexture)
-        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, bw, bh)
+        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, allocW, allocH)
         if (cacheTempResources) {
           this.#cachedTexture8 = mipDstTexture
-          this.#cachedTexture8Width = bw
-          this.#cachedTexture8Height = bh
+          this.#cachedTexture8Width = allocW
+          this.#cachedTexture8Height = allocH
         }
       }
     } else {
@@ -948,11 +978,11 @@ export class SparkGL {
         }
         mipDstTexture = gl.createTexture()
         gl.bindTexture(gl.TEXTURE_2D, mipDstTexture)
-        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, bw, bh)
+        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, allocW, allocH)
         if (cacheTempResources) {
           this.#cachedTexture16 = mipDstTexture
-          this.#cachedTexture16Width = bw
-          this.#cachedTexture16Height = bh
+          this.#cachedTexture16Width = allocW
+          this.#cachedTexture16Height = allocH
         }
       }
     }

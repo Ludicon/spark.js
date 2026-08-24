@@ -238,6 +238,31 @@ export interface SparkGLCreateOptions {
   cacheTempResources?: boolean
 
   /**
+   * HINT: the largest texture this session expects to encode, in TEXELS (e.g. `4096`).
+   *
+   * A hint and not a limit — an encode larger than it still grows the target rather than
+   * being refused. What it changes is WHEN the target reaches its final size, not how big it
+   * is allowed to get, which is why the name says hint.
+   *
+   * The cached render target holds encoded BLOCKS, so it needs `ceil(size/4)` texels a side,
+   * and it only ever grows. A caller that encodes a small texture before a large one
+   * therefore pays twice: the first encode sizes the target to fit itself, the second finds
+   * it too small, deletes it and allocates again. That is the ordinary shape of a progressive
+   * loader — a small preview, then the full-resolution image — and not something the caller
+   * can reorder its way out of.
+   *
+   * Declaring the ceiling here allocates the target once, at the size the grow path would
+   * have reached anyway. Nothing else changes: the encode drives the viewport and the
+   * readback from the current mip's own block extents, so a target larger than the encode
+   * needs has always been legal.
+   *
+   * Only meaningful together with `cacheTempResources` — without it there is no cached target
+   * to size. An encode larger than the ceiling still grows the target rather than failing:
+   * this is a statement about the common case, not a limit.
+   */
+  hintMaxTmpCacheResolution?: number
+
+  /**
    * Enable verbose logging for debugging.
    * @default false
    */
@@ -373,6 +398,16 @@ export class SparkGL {
    * Call this when you're done encoding textures to free up GPU memory.
    */
   freeTempResources(): void
+
+  /**
+   * Restate `hintMaxTmpCacheResolution` after construction.
+   *
+   * A session that outlives the thing it encodes — one encoder, many models — knows the
+   * device's limits at construction but not the content's, and sizing from the device cap is
+   * the expensive mistake. Takes effect the next time the cached target is allocated or
+   * grown; it deliberately does not reallocate an existing one. `0` restores grow-to-fit.
+   */
+  setHintMaxTmpCacheResolution(resolution: number): void
 
   /**
    * Source-copy pool statistics: how many were served from the pool, how many allocated
