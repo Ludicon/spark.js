@@ -16,9 +16,15 @@ await server.listen()
 const port = server.config.server.port ?? server.httpServer.address().port
 const url = `http://localhost:${port}/tests/harness.html`
 
-const browser = await chromium.launch({
-  args: ["--enable-unsafe-webgpu", "--ignore-gpu-blocklist", "--enable-features=Vulkan"]
-})
+// Prefer the installed Chrome: its headless mode uses the real GPU, while the bundled headless
+// shell falls back to SwiftShader, whose emulated compressed formats are not reliable at mip
+// levels above 0. Set SPARK_TEST_BROWSER=bundled to force the bundled Chromium (e.g. on CI).
+const launchOptions = { args: ["--enable-unsafe-webgpu", "--ignore-gpu-blocklist", "--enable-features=Vulkan"] }
+let browser
+if (process.env.SPARK_TEST_BROWSER !== "bundled") {
+  browser = await chromium.launch({ ...launchOptions, channel: "chrome" }).catch(() => null)
+}
+browser ??= await chromium.launch(launchOptions)
 const page = await browser.newPage()
 
 const pageErrors = []

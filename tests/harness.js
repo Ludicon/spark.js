@@ -69,6 +69,13 @@ export async function run() {
   window.__done = true
 }
 
+/** True when WebGL runs on SwiftShader, whose emulated compressed formats are unreliable at mip levels above 0. */
+export function isSoftwareGL(gl) {
+  const ext = gl.getExtension("WEBGL_debug_renderer_info")
+  const renderer = gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER)
+  return /SwiftShader|llvmpipe/i.test(renderer)
+}
+
 /** A small opaque ImageBitmap to encode. */
 export async function makeTestImage(width = 16, height = 16) {
   const canvas = new OffscreenCanvas(width, height)
