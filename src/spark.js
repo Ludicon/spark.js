@@ -303,21 +303,17 @@ class Spark {
   }
 
   dispose() {
-    for (const pipeline of this.#pipelines) {
-      pipeline.destroy()
-    }
-    this.#mipmapPipeline.destroy()
-    this.#resizePipeline.destroy()
-    this.#flipYPipeline.destroy()
-    this.#detectChannelCountPipeline.destroy()
+    // Pipelines and samplers are not destroyable in WebGPU; drop references and let GC reclaim them.
+    this.#pipelines = []
 
-    this.#defaultSampler.destroy()
     for (let i = 0; i < 3; i++) {
       this.#uniformBuffer[i].destroy()
     }
-    this.#querySet.destroy()
-    this.#queryBuffer.destroy()
-    this.#queryReadbackBuffer.destroy()
+    if (this.#querySet) {
+      this.#querySet.destroy()
+      this.#queryBuffer.destroy()
+      this.#queryReadbackBuffer.destroy()
+    }
 
     this.freeTempResources()
   }

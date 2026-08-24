@@ -284,8 +284,9 @@ export class SparkGL {
 
   /**
    * Destroys the SparkGL instance and all associated GPU resources.
+   * Resolves once any programs still being compiled have been deleted.
    */
-  dispose(): void
+  dispose(): Promise<void>
 
   /**
    * Load an image and encode it to a compressed WebGL texture.

@@ -297,6 +297,7 @@ export class SparkGL {
   #gl
   #supportedFormats
   #programs = []
+  #disposed = false
   #verbose = false
   #validateShaders = false
   #encodeCounter = 0
@@ -328,18 +329,32 @@ export class SparkGL {
       this.#preloadShaders(options.preload)
     }
   }
-  dispose() {
+  async dispose() {
     const gl = this.#gl
-
-    if (this.#fullscreenVertexShader) {
-      gl.deleteShader(this.#fullscreenVertexShader)
-    }
-    for (const program of this.#programs) {
-      gl.deleteProgram(program)
-    }
+    this.#disposed = true
 
     // Clean up cached temporary resources
     this.freeTempResources()
+
+    // #programs holds promises (see #loadProgram), so a program may still be compiling.
+    // Wait for each one before deleting it, and ignore rejected loads: a shader that failed
+    // to compile has nothing to delete and already reported its error to the caller.
+    const programs = this.#programs
+    this.#programs = []
+    for (const entry of programs) {
+      if (!entry) continue
+      try {
+        const program = await entry
+        gl.deleteProgram(program)
+      } catch {
+        // Nothing to delete.
+      }
+    }
+
+    if (this.#fullscreenVertexShader) {
+      gl.deleteShader(this.#fullscreenVertexShader)
+      this.#fullscreenVertexShader = null
+    }
   }
 
   /**
@@ -479,6 +494,11 @@ export class SparkGL {
       }
 
       const fragmentShaderSource = await loadShaderSource(shaderFile)
+
+      // dispose() may have run while the source was loading; the vertex shader is gone.
+      if (this.#disposed) {
+        throw new Error("SparkGL was disposed while loading program for format: " + SparkFormatName[format])
+      }
 
       const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource, this.#validateShaders)
       const program = createProgram(gl, this.#fullscreenVertexShader, fragmentShader, this.#validateShaders)
