@@ -63,7 +63,7 @@ Creates a new Spark instance for WebGPU.
 - `device` (`GPUDevice`) - WebGPU device with required features enabled
 - `options` (`Object`, optional) - Configuration options:
   - `preload` (`boolean` or `string[]`, default: `false`) - Whether to preload all or a subset of the encoder pipelines. Pipelines that are not preloaded are compiled on-demand when first used.
-  - `cacheTempResources` (`boolean`, default: `false`) - Whether to cache temporary resources for reuse across `encodeTexture` calls. Cached resources grow to fit the largest encode and are freed by `freeTempResources()` or `dispose()`. Improves performance when encoding multiple textures.
+  - `cacheTempResources` (`boolean` or `object`, default: `false`) - Whether to cache temporary resources for reuse across `encodeTexture` calls. Cached resources grow to fit the largest encode and are freed by `freeTempResources()` or `dispose()`. Improves performance when encoding multiple textures. Pass an object to enable caching and control the allocation (see [Resource Caching](#resource-caching)).
   - `verbose` (`boolean`, default: `false`) - Enable verbose logging for debugging.
   - `useTimestampQueries` (`boolean`, default: `false`) - Enable GPU timestamp queries for performance profiling (requires `timestamp-query` feature and enabling unsafe WebGPU features in the browser).
 
@@ -104,7 +104,7 @@ Creates a new SparkGL instance for WebGL2.
     - `false` - Load shaders on-demand
     - `true` - Preload all supported formats
     - `string[]` - Array of format names to preload (e.g., `["bc7", "astc"]`)
-  - `cacheTempResources` (`boolean`, default: `false`) - Whether to cache temporary resources for reuse across `encodeTexture` calls. Cached resources grow to fit the largest encode and are freed by `freeTempResources()` or `dispose()`. Improves performance when encoding multiple textures.
+  - `cacheTempResources` (`boolean` or `object`, default: `false`) - Whether to cache temporary resources for reuse across `encodeTexture` calls. Cached resources grow to fit the largest encode and are freed by `freeTempResources()` or `dispose()`. Improves performance when encoding multiple textures. Pass an object to enable caching and control the allocation (see [Resource Caching](#resource-caching)).
   - `verbose` (`boolean`, default: `false`) - Enable verbose logging for debugging.
   - `validateShaders` (`boolean`, default: `false`) - Enable WebGL shader validation. Only enable thsi for debuggigng, as it disables async shader compilation.
 
@@ -312,7 +312,7 @@ const spark = SparkGL.create(gl, { preload: ["rgb", "rg", "r"] })
 
 ### Resource Caching
 
-Enable resource caching for batch encoding:
+Each `encodeTexture()` call needs a few temporary GPU resources: a copy of the source image (with mipmaps, if requested), an intermediate buffer or render target for the encoded blocks, and a readback buffer. By default these are allocated and freed on every call. When encoding many textures, enable `cacheTempResources` to keep them alive across calls:
 
 ```js
 const spark = await Spark.create(device, { cacheTempResources: true })
@@ -323,6 +323,23 @@ const textures = await Promise.all(
 // Free cached resources
 spark.freeTempResources()
 ```
+
+Cached resources are allocated lazily, the first time an encode needs them, and are sized by that encode. A later encode that is larger, or that needs more mipmap levels, reallocates them; a smaller one reuses them. They are released by `freeTempResources()` or `dispose()`.
+
+#### Sizing the cache
+
+Because the cache only grows on demand, a sequence of encodes of increasing size (for example 64, 128, 256, 512) reallocates at every step. To avoid this, pass an object instead of `true` to control how the cached resources are allocated. Both fields are optional and behave the same in `Spark` and `SparkGL`:
+
+```js
+const spark = await Spark.create(device, {
+  cacheTempResources: { minSize: 2048, allocateMipmaps: true }
+})
+```
+
+- `minSize` (`number`, default: `0`) - Minimum width and height, in texels, that cached resources are allocated for. With `minSize: 512` the sequence above allocates once, on the first encode. Encodes larger than `minSize` still grow the cache. The value is clamped to the device's maximum texture size.
+- `allocateMipmaps` (`boolean`, default: `false`) - Allocate cached resources with a full mip chain even if the encode that triggers the allocation does not generate mipmaps. By default the chain is only allocated when the triggering encode requests mipmaps, so callers that never use mipmaps (for example tile renderers) don't pay for it. Callers that mix mipmapped and non-mipmapped encodes can set this to avoid a reallocation the first time mipmaps are requested.
+
+Memory cost for `minSize = N` is roughly `N² × 4` bytes for the RGBA8 source copy (×4/3 with mipmaps), plus `(N/4)² × 16` bytes per block render target or output buffer. For `N = 4096` that is 64–85 MB plus 16 MB.
 
 ### Verbose Logging
 

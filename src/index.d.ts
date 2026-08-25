@@ -5,6 +5,27 @@
 /**
  * Options for initializing Spark (WebGPU) encoder
  */
+/**
+ * Options controlling how temporary resources are cached across encodeTexture calls.
+ */
+export interface SparkCacheOptions {
+  /**
+   * Minimum width and height (in texels) that cached resources are allocated for, so that a
+   * sequence of encodes of increasing size up to this value does not reallocate them.
+   * Encodes larger than this still grow the cache. Clamped to the device's maximum texture size.
+   * @default 0 (size of the encode that triggers the allocation)
+   */
+  minSize?: number
+
+  /**
+   * Allocate cached resources with a full mip chain even when the encode that triggers the
+   * allocation does not generate mipmaps. Avoids a reallocation the first time a mipmapped
+   * encode is requested, at the cost of ~33% more memory for the source texture.
+   * @default false
+   */
+  allocateMipmaps?: boolean
+}
+
 export interface SparkCreateOptions {
   /**
    * Whether to preload all encoder pipelines or an array of format names to preload.
@@ -16,9 +37,10 @@ export interface SparkCreateOptions {
   /**
    * Whether to cache temporary resources for reuse across encodeTexture calls.
    * Improves performance when encoding multiple textures, but uses more GPU memory.
+   * Pass an object to enable caching and control how the resources are allocated.
    * @default false
    */
-  cacheTempResources?: boolean
+  cacheTempResources?: boolean | SparkCacheOptions
 
   /**
    * Enable verbose logging for debugging.
@@ -207,9 +229,10 @@ export interface SparkGLCreateOptions {
 
   /**
    * Whether to cache temporary resources for reuse across encodeTexture calls.
+   * Pass an object to enable caching and control how the resources are allocated.
    * @default false
    */
-  cacheTempResources?: boolean
+  cacheTempResources?: boolean | SparkCacheOptions
 
   /**
    * Enable verbose logging for debugging.

@@ -1,5 +1,23 @@
 // Shared utilities for spark.js and spark-gl.js
 
+/**
+ * Normalize the cacheTempResources option, which is either a boolean or an object
+ * { minSize, allocateMipmaps }. Returns { enabled, minSize, allocateMipmaps }.
+ * - minSize: minimum width/height (in texels) cached resources are allocated for; 0 means
+ *   "size of the encode that triggers the allocation".
+ * - allocateMipmaps: allocate a full mip chain even if the triggering encode has no mipmaps.
+ */
+export function parseCacheTempResources(option) {
+  if (typeof option === "object" && option !== null) {
+    const minSize = option.minSize ?? 0
+    if (!Number.isInteger(minSize) || minSize < 0) {
+      throw new Error(`cacheTempResources.minSize must be a non-negative integer, got ${minSize}`)
+    }
+    return { enabled: true, minSize, allocateMipmaps: Boolean(option.allocateMipmaps) }
+  }
+  return { enabled: Boolean(option), minSize: 0, allocateMipmaps: false }
+}
+
 export function assert(condition, message) {
   if (!condition) {
     throw new Error(message)
