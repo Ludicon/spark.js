@@ -584,8 +584,10 @@ class Spark {
 
     const format = await this.#getBestMatchingFormat(options, image)
 
-    // Start loading the pipeline as soon as we know the format.
-    const pipelinePromise = this.#loadPipeline(format)
+    // Load the pipeline and wait for it before touching any cached resource: everything from here to
+    // queue.submit() must run without suspending, otherwise a concurrent encodeTexture()
+    // call could overwrite or reallocate the cached textures and buffers underneath us.
+    const pipeline = await this.#loadPipeline(format)
 
     // Round up the size to meet WebGPU's 4-texel alignment requirement, unless the texture-compression-unaligned feature lifts it.
     const width = this.#supportsUnalignedTextures ? srcWidth : Math.ceil(srcWidth / 4) * 4
@@ -807,9 +809,6 @@ class Spark {
         }
       }
     }
-
-    // Make sure the pipeline is loaded. Wait if necessary.
-    const pipeline = await pipelinePromise
 
     const pass = commandEncoder.beginComputePass(args)
     pass.setPipeline(pipeline)

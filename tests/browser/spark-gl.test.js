@@ -38,7 +38,7 @@ test("SparkGL: dispose before any encode does not leak", async () => {
 test("SparkGL: dispose while a program is compiling rejects the encode cleanly", async () => {
   const tracker = createGL()
   const spark = SparkGL.create(tracker.gl)
-  const format = spark.getSupportedFormats()[0]
+  const format = "rgb"
 
   const image = await makeTestImage()
   const pending = spark.encodeTexture(image, { format })
@@ -52,7 +52,7 @@ test("SparkGL: dispose can be called twice", async () => {
   const tracker = createGL()
   const spark = SparkGL.create(tracker.gl, { cacheTempResources: true })
   const image = await makeTestImage()
-  const result = await spark.encodeTexture(image, { format: spark.getSupportedFormats()[0] })
+  const result = await spark.encodeTexture(image, { format: "rgb" })
   tracker.gl.deleteTexture(result.texture)
 
   await spark.dispose()
@@ -65,7 +65,7 @@ test("SparkGL: encode without cacheTempResources leaves only the output texture"
   const spark = SparkGL.create(tracker.gl)
   const image = await makeTestImage()
   const before = tracker.live.size
-  const result = await spark.encodeTexture(image, { format: spark.getSupportedFormats()[0], generateMipmaps: true })
+  const result = await spark.encodeTexture(image, { format: "rgb", generateMipmaps: true })
   const after = tracker.live.size
   // Program + vertex shader are cached; the output texture belongs to the caller.
   const owned = [...tracker.live.entries()].filter(([, kind]) => kind === "Texture")
@@ -80,7 +80,7 @@ test("SparkGL: encode without cacheTempResources leaves only the output texture"
 test("SparkGL: repeated encodes with cacheTempResources do not grow resource count", async () => {
   const tracker = createGL()
   const spark = SparkGL.create(tracker.gl, { cacheTempResources: true })
-  const format = spark.getSupportedFormats()[0]
+  const format = "rgb"
   const image = await makeTestImage()
 
   const encode = async () => {

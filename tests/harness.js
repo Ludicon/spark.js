@@ -87,3 +87,12 @@ export async function makeTestImage(width = 16, height = 16) {
   ctx.fillRect(0, 0, width, height)
   return createImageBitmap(canvas)
 }
+
+/** A solid-colour ImageBitmap, e.g. makeSolidImage(64, "#ff0000"). */
+export async function makeSolidImage(size, color) {
+  const canvas = new OffscreenCanvas(size, size)
+  const ctx = canvas.getContext("2d")
+  ctx.fillStyle = color
+  ctx.fillRect(0, 0, size, size)
+  return createImageBitmap(canvas)
+}

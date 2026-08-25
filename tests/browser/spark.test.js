@@ -1,5 +1,5 @@
 import { Spark } from "../../src/index.js"
-import { test, assert, skip, makeTestImage } from "../harness.js"
+import { test, assert, skip, makeTestImage, makeSolidImage } from "../harness.js"
 
 async function createDevice() {
   const adapter = await navigator.gpu?.requestAdapter()
@@ -71,7 +71,7 @@ function countAllocations(device) {
 test("Spark: minSize allocates once for a sequence of growing encodes", async () => {
   const device = await createDevice()
   const spark = await Spark.create(device, { cacheTempResources: { minSize: 512 } })
-  const format = spark.getSupportedFormats()[0]
+  const format = "rgb"
 
   await expectNoValidationErrors(device, async () => {
     const first = await spark.encodeTexture(await makeTestImage(64, 64), { format })
@@ -93,7 +93,7 @@ test("Spark: minSize allocates once for a sequence of growing encodes", async ()
 test("Spark: allocateMipmaps avoids reallocation when mipmaps are requested later", async () => {
   const device = await createDevice()
   const spark = await Spark.create(device, { cacheTempResources: { minSize: 64, allocateMipmaps: true } })
-  const format = spark.getSupportedFormats()[0]
+  const format = "rgb"
 
   await expectNoValidationErrors(device, async () => {
     const flat = await spark.encodeTexture(await makeTestImage(64, 64), { format })
@@ -104,6 +104,89 @@ test("Spark: allocateMipmaps avoids reallocation when mipmaps are requested late
     mipped.destroy()
     assert.equal(counts.textures, 1, `unexpected texture allocations: ${counts.textures}`)
     assert.equal(counts.buffers, 0, `unexpected buffer allocations: ${counts.buffers}`)
+    spark.dispose()
+  })
+  device.destroy()
+})
+
+// Decode mip level 0 of a compressed texture to RGBA8 by sampling it in a render pass.
+async function readTexture(device, texture, width, height) {
+  const module = device.createShaderModule({
+    code: `
+      @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+        let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+        return vec4f(p * 2.0 - 1.0, 0.0, 1.0);
+      }
+      @group(0) @binding(0) var t: texture_2d<f32>;
+      @fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+        return textureLoad(t, vec2i(pos.xy), 0);
+      }`
+  })
+  const pipeline = await device.createRenderPipelineAsync({
+    layout: "auto",
+    vertex: { module, entryPoint: "vs" },
+    fragment: { module, entryPoint: "fs", targets: [{ format: "rgba8unorm" }] }
+  })
+  const target = device.createTexture({
+    size: [width, height],
+    format: "rgba8unorm",
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+  })
+  const bytesPerRow = Math.ceil((width * 4) / 256) * 256
+  const buffer = device.createBuffer({ size: bytesPerRow * height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+  const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [{ binding: 0, resource: texture.createView({ baseMipLevel: 0, mipLevelCount: 1 }) }]
+  })
+
+  const encoder = device.createCommandEncoder()
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{ view: target.createView(), loadOp: "clear", storeOp: "store" }]
+  })
+  pass.setPipeline(pipeline)
+  pass.setBindGroup(0, bindGroup)
+  pass.draw(3)
+  pass.end()
+  encoder.copyTextureToBuffer({ texture: target }, { buffer, bytesPerRow }, [width, height])
+  device.queue.submit([encoder.finish()])
+
+  await buffer.mapAsync(GPUMapMode.READ)
+  const mapped = new Uint8Array(buffer.getMappedRange())
+  const pixels = new Uint8Array(width * height * 4)
+  for (let y = 0; y < height; y++) {
+    pixels.set(mapped.subarray(y * bytesPerRow, y * bytesPerRow + width * 4), y * width * 4)
+  }
+  buffer.unmap()
+  buffer.destroy()
+  target.destroy()
+  return pixels
+}
+
+function assertSolid(pixels, [r, g, b], label, tolerance = 8) {
+  for (let i = 0; i < pixels.length; i += 4) {
+    const ok = Math.abs(pixels[i] - r) <= tolerance && Math.abs(pixels[i + 1] - g) <= tolerance && Math.abs(pixels[i + 2] - b) <= tolerance
+    if (!ok) {
+      throw new Error(`${label}: pixel ${i / 4} is (${pixels[i]}, ${pixels[i + 1]}, ${pixels[i + 2]}), expected (${r}, ${g}, ${b})`)
+    }
+  }
+}
+
+test("Spark: concurrent encodes with cacheTempResources do not interfere", async () => {
+  const device = await createDevice()
+  // No preload: the first encode waits for the pipeline to compile, which is when a
+  // concurrent encode can reuse or reallocate the cached resources underneath it.
+  const spark = await Spark.create(device, { cacheTempResources: true })
+  const format = "rgb"
+
+  await expectNoValidationErrors(device, async () => {
+    const [red, green] = await Promise.all([
+      spark.encodeTexture(await makeSolidImage(64, "#ff0000"), { format }),
+      spark.encodeTexture(await makeSolidImage(128, "#00ff00"), { format })
+    ])
+    assertSolid(await readTexture(device, red, 64, 64), [255, 0, 0], "red")
+    assertSolid(await readTexture(device, green, 128, 128), [0, 255, 0], "green")
+    red.destroy()
+    green.destroy()
     spark.dispose()
   })
   device.destroy()
