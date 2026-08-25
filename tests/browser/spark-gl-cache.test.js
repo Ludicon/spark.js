@@ -1,5 +1,5 @@
 import { SparkGL } from "../../src/index.js"
-import { test, assert, skip, isSoftwareGL, makeSolidImage } from "../harness.js"
+import { test, assert, skip, isSoftwareGL, makeSolidImage, makeNoiseImage, firstDifference } from "../harness.js"
 import { trackGL } from "../gl-tracker.js"
 
 function createGL() {
@@ -73,26 +73,60 @@ function assertSolid(pixels, [r, g, b], label, tolerance = 8) {
   }
 }
 
-test("SparkGL: cached source texture is reused correctly for a smaller image with mipmaps", async () => {
+// Count createTexture calls: handle counting alone cannot see a delete+create reallocation.
+function countTextureCreations(gl) {
+  const counter = { count: 0 }
+  const raw = gl.createTexture
+  gl.createTexture = () => {
+    counter.count++
+    return raw.call(gl)
+  }
+  return counter
+}
+
+test("SparkGL: cached source texture is reused for an image of the same size", async () => {
   const tracker = createGL()
   const gl = tracker.gl
   const spark = SparkGL.create(gl, { cacheTempResources: true })
   const format = "rgb"
 
-  // First encode sizes the cache at 32x32 with 4 mip levels and leaves the source texture dirty.
+  // First encode sizes the cache and leaves the source texture's base level dirty.
   const red = await spark.encodeTexture(await makeSolidImage(32, "#ff0000"), { format, generateMipmaps: true })
   assertSolid(readMipLevel(gl, red.texture, 0, 32, 32), [255, 0, 0], "red level 0")
   gl.deleteTexture(red.texture)
 
-  const live = tracker.live.size
+  const created = countTextureCreations(gl)
+  const green = await spark.encodeTexture(await makeSolidImage(32, "#00ff00"), { format, generateMipmaps: true })
+  assert.equal(created.count, 1, "expected only the output texture to be created")
+  assert.equal(green.mipmapCount, 4, "unexpected mipmap count")
+  for (let level = 0; level < 4; level++) {
+    const size = 32 >> level
+    assertSolid(readMipLevel(gl, green.texture, level, size, size), [0, 255, 0], `green level ${level}`)
+  }
+  gl.deleteTexture(green.texture)
 
-  // Second encode must reuse the larger cached source texture: only the new output is added.
+  await spark.dispose()
+  assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
+})
+
+test("SparkGL: cached source texture is reallocated for a smaller image", async () => {
+  const tracker = createGL()
+  const gl = tracker.gl
+  const spark = SparkGL.create(gl, { cacheTempResources: true })
+  const format = "rgb"
+
+  const red = await spark.encodeTexture(await makeSolidImage(32, "#ff0000"), { format, generateMipmaps: true })
+  gl.deleteTexture(red.texture)
+
+  // A larger cached texture must not be reused: its stale content would bleed into edge
+  // blocks and mipmaps (https://github.com/Ludicon/spark.js/issues/42).
+  const created = countTextureCreations(gl)
   const green = await spark.encodeTexture(await makeSolidImage(16, "#00ff00"), { format, generateMipmaps: true })
-  assert.equal(tracker.live.size, live + 1, `source texture was reallocated: ${tracker.describe()}`)
-  assert.equal(green.mipmapCount, 3, "unexpected mipmap count")
-  assertSolid(readMipLevel(gl, green.texture, 0, 16, 16), [0, 255, 0], "green level 0")
-  assertSolid(readMipLevel(gl, green.texture, 1, 8, 8), [0, 255, 0], "green level 1")
-  assertSolid(readMipLevel(gl, green.texture, 2, 4, 4), [0, 255, 0], "green level 2")
+  assert.equal(created.count, 2, "expected the output texture and a reallocated source texture")
+  for (let level = 0; level < 3; level++) {
+    const size = 16 >> level
+    assertSolid(readMipLevel(gl, green.texture, level, size, size), [0, 255, 0], `green level ${level}`)
+  }
   gl.deleteTexture(green.texture)
 
   await spark.dispose()
@@ -120,17 +154,6 @@ test("SparkGL: cached source texture is reallocated for a larger image", async (
   assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
 })
 
-// Count createTexture calls: handle counting alone cannot see a delete+create reallocation.
-function countTextureCreations(gl) {
-  const counter = { count: 0 }
-  const raw = gl.createTexture
-  gl.createTexture = () => {
-    counter.count++
-    return raw.call(gl)
-  }
-  return counter
-}
-
 test("SparkGL: minSize allocates once for a sequence of growing encodes", async () => {
   const tracker = createGL()
   const gl = tracker.gl
@@ -141,13 +164,22 @@ test("SparkGL: minSize allocates once for a sequence of growing encodes", async 
   gl.deleteTexture(first.texture)
 
   const created = countTextureCreations(gl)
+  let buffersCreated = 0
+  const rawCreateBuffer = gl.createBuffer
+  gl.createBuffer = () => {
+    buffersCreated++
+    return rawCreateBuffer.call(gl)
+  }
   for (const size of [128, 256, 512]) {
     const result = await spark.encodeTexture(await makeSolidImage(size, "#00ff00"), { format })
     assertSolid(readMipLevel(gl, result.texture, 0, size, size), [0, 255, 0], `${size} level 0`)
     gl.deleteTexture(result.texture)
   }
-  // readMipLevel creates one texture per call; plus one output per encode.
-  assert.equal(created.count, 6, `cache was reallocated: ${created.count} textures created`)
+  // Per encode: the output texture, the source texture (exact size, so reallocated for each
+  // new size) and one texture from readMipLevel. The block render target must not be
+  // reallocated, nor the readback buffer.
+  assert.equal(created.count, 9, `block render target was reallocated: ${created.count} textures created`)
+  assert.equal(buffersCreated, 0, `readback buffer was reallocated: ${buffersCreated} buffers created`)
 
   // Larger than minSize still grows the cache.
   const big = await spark.encodeTexture(await makeSolidImage(1024, "#0000ff"), { format })
@@ -168,9 +200,9 @@ test("SparkGL: allocateMipmaps avoids reallocation when mipmaps are requested la
   gl.deleteTexture(flat.texture)
 
   const created = countTextureCreations(gl)
-  const mipped = await spark.encodeTexture(await makeSolidImage(32, "#00ff00"), { format, generateMipmaps: true })
+  const mipped = await spark.encodeTexture(await makeSolidImage(64, "#00ff00"), { format, generateMipmaps: true })
   assert.equal(created.count, 1, "expected only the output texture to be created")
-  assertSolid(readMipLevel(gl, mipped.texture, 2, 8, 8), [0, 255, 0], "green level 2")
+  assertSolid(readMipLevel(gl, mipped.texture, 2, 16, 16), [0, 255, 0], "green level 2")
   gl.deleteTexture(mipped.texture)
 
   await spark.dispose()
@@ -187,11 +219,11 @@ test("SparkGL: without allocateMipmaps the source texture is reallocated once fo
   gl.deleteTexture(flat.texture)
 
   const created = countTextureCreations(gl)
-  const mipped = await spark.encodeTexture(await makeSolidImage(32, "#00ff00"), { format, generateMipmaps: true })
+  const mipped = await spark.encodeTexture(await makeSolidImage(64, "#00ff00"), { format, generateMipmaps: true })
   assert.equal(created.count, 2, "expected output texture plus one source reallocation")
   gl.deleteTexture(mipped.texture)
 
-  // The reallocated chain is sized for minSize, so a mipmapped 64x64 reuses it.
+  // The reallocated source texture has a mip chain, so another mipmapped 64x64 reuses it.
   const again = await spark.encodeTexture(await makeSolidImage(64, "#0000ff"), { format, generateMipmaps: true })
   assert.equal(created.count, 3, "expected no further reallocation")
   assertSolid(readMipLevel(gl, again.texture, 3, 8, 8), [0, 0, 255], "blue level 3")
@@ -210,4 +242,52 @@ test("SparkGL: invalid minSize is rejected", async () => {
     threw = true
   }
   assert.ok(threw, "expected an error for negative minSize")
+})
+
+const CONSISTENCY_SHAPES = [
+  [1024, 256],
+  [128, 64]
+]
+
+// Encode each shape with mipmaps and decode every level.
+async function encodeAndDecodeAll(gl, spark, images) {
+  const results = []
+  for (const image of images) {
+    const result = await spark.encodeTexture(image, { format: "rgb", generateMipmaps: true })
+    const levels = []
+    for (let level = 0; level < result.mipmapCount; level++) {
+      const w = Math.max(1, image.width >> level)
+      const h = Math.max(1, image.height >> level)
+      levels.push(readMipLevel(gl, result.texture, level, w, h))
+    }
+    gl.deleteTexture(result.texture)
+    results.push(levels)
+  }
+  return results
+}
+
+test("SparkGL: cacheTempResources does not change the encoded result", async () => {
+  const tracker = createGL()
+  const gl = tracker.gl
+  const images = await Promise.all(CONSISTENCY_SHAPES.map(([w, h], i) => makeNoiseImage(w, h, i + 1)))
+
+  const plain = SparkGL.create(gl)
+  const expected = await encodeAndDecodeAll(gl, plain, images)
+  await plain.dispose()
+
+  // Size the cache with a large, contrasting encode first, then encode the test shapes.
+  const cached = SparkGL.create(gl, { cacheTempResources: true })
+  const big = await cached.encodeTexture(await makeSolidImage(1024, "#ff00ff"), { format: "rgb", generateMipmaps: true })
+  gl.deleteTexture(big.texture)
+  const actual = await encodeAndDecodeAll(gl, cached, images)
+  await cached.dispose()
+
+  for (let i = 0; i < images.length; i++) {
+    assert.equal(actual[i].length, expected[i].length, `mip count differs for ${images[i].width}x${images[i].height}`)
+    for (let level = 0; level < expected[i].length; level++) {
+      const diff = firstDifference(actual[i][level], expected[i][level])
+      assert.ok(!diff, `${images[i].width}x${images[i].height} level ${level}: ${diff}`)
+    }
+  }
+  assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
 })

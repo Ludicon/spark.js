@@ -652,15 +652,16 @@ export class SparkGL {
 
     const cacheTempResources = this.#cacheTempResources
 
-    // Create or reuse input texture. A cached texture is reused when it is at least as large
-    // as the image and has at least as many mip levels; the encoder only reads the region
-    // covered by the image, so a larger texture is fine.
+    // Create or reuse input texture. A cached texture is only reused when it has exactly the
+    // same size as the image: generateMipmap and the encoders read the whole texture (edge
+    // blocks and mip filters fetch past the image extent), so a larger texture would bleed
+    // the previous image into the result. See https://github.com/Ludicon/spark.js/issues/42.
     let srcTexture
     const needsSrcRealloc =
       !cacheTempResources ||
       !this.#cachedSrcTexture ||
-      this.#cachedSrcWidth < width ||
-      this.#cachedSrcHeight < height ||
+      this.#cachedSrcWidth !== width ||
+      this.#cachedSrcHeight !== height ||
       this.#cachedSrcMipLevelCount < mipmapCount
 
     if (!needsSrcRealloc) {
@@ -670,18 +671,16 @@ export class SparkGL {
       if (cacheTempResources && this.#cachedSrcTexture) {
         gl.deleteTexture(this.#cachedSrcTexture)
       }
-      // When caching, honor the minimum size and mipmap allocation hints.
-      const allocWidth = Math.max(width, this.#cacheMinSize)
-      const allocHeight = Math.max(height, this.#cacheMinSize)
+      // When caching, honor the mipmap allocation hint (minSize does not apply, see above).
       const allocMipmaps = generateMipmaps || this.#cacheAllocateMipmaps
-      const allocMipLevelCount = allocMipmaps ? computeMipmapCount(allocWidth, allocHeight) : 1
+      const allocMipLevelCount = allocMipmaps ? computeMipmapCount(width, height) : 1
       srcTexture = gl.createTexture()
       gl.bindTexture(gl.TEXTURE_2D, srcTexture)
-      gl.texStorage2D(gl.TEXTURE_2D, allocMipLevelCount, gl.RGBA8, allocWidth, allocHeight)
+      gl.texStorage2D(gl.TEXTURE_2D, allocMipLevelCount, gl.RGBA8, width, height)
       if (cacheTempResources) {
         this.#cachedSrcTexture = srcTexture
-        this.#cachedSrcWidth = allocWidth
-        this.#cachedSrcHeight = allocHeight
+        this.#cachedSrcWidth = width
+        this.#cachedSrcHeight = height
         this.#cachedSrcMipLevelCount = allocMipLevelCount
       }
     }

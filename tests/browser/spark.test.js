@@ -1,5 +1,5 @@
 import { Spark } from "../../src/index.js"
-import { test, assert, skip, makeTestImage, makeSolidImage } from "../harness.js"
+import { test, assert, skip, makeTestImage, makeSolidImage, makeTwoToneImage, makeNoiseImage, firstDifference } from "../harness.js"
 
 async function createDevice() {
   const adapter = await navigator.gpu?.requestAdapter()
@@ -82,8 +82,9 @@ test("Spark: minSize allocates once for a sequence of growing encodes", async ()
       const result = await spark.encodeTexture(await makeTestImage(size, size), { format })
       result.destroy()
     }
-    // One output texture per encode, no cache reallocations.
-    assert.equal(counts.textures, 3, `unexpected texture allocations: ${counts.textures}`)
+    // Per encode: the output texture and the source texture (exact size, so reallocated for
+    // each new size). The output buffer must not be reallocated.
+    assert.equal(counts.textures, 6, `unexpected texture allocations: ${counts.textures}`)
     assert.equal(counts.buffers, 0, `unexpected buffer allocations: ${counts.buffers}`)
     spark.dispose()
   })
@@ -100,7 +101,7 @@ test("Spark: allocateMipmaps avoids reallocation when mipmaps are requested late
     flat.destroy()
 
     const counts = countAllocations(device)
-    const mipped = await spark.encodeTexture(await makeTestImage(32, 32), { format, generateMipmaps: true })
+    const mipped = await spark.encodeTexture(await makeTestImage(64, 64), { format, generateMipmaps: true })
     mipped.destroy()
     assert.equal(counts.textures, 1, `unexpected texture allocations: ${counts.textures}`)
     assert.equal(counts.buffers, 0, `unexpected buffer allocations: ${counts.buffers}`)
@@ -226,3 +227,89 @@ test("Spark: mipsAlphaScale applies a different scale to each mip level", async 
   })
   device.destroy()
 })
+
+function pixelAt(pixels, width, x, y) {
+  const i = (y * width + x) * 4
+  return [pixels[i], pixels[i + 1], pixels[i + 2]]
+}
+
+function assertColor([r, g, b], [er, eg, eb], label, tolerance = 8) {
+  assert.ok(
+    Math.abs(r - er) <= tolerance && Math.abs(g - eg) <= tolerance && Math.abs(b - eb) <= tolerance,
+    `${label}: got (${r}, ${g}, ${b}), expected (${er}, ${eg}, ${eb})`
+  )
+}
+
+test("Spark: cached resources are not reused for a smaller image with flipY", async () => {
+  const device = await createDevice()
+  const spark = await Spark.create(device, { cacheTempResources: true })
+  const format = "rgb"
+
+  await expectNoValidationErrors(device, async () => {
+    // Top half red, bottom half green. flipY goes through the cached tmp texture.
+    const big = await spark.encodeTexture(await makeTwoToneImage(128, "#ff0000", "#00ff00"), { format, flipY: true })
+    big.destroy()
+
+    const small = await spark.encodeTexture(await makeTwoToneImage(64, "#ff0000", "#00ff00"), { format, flipY: true })
+    const pixels = await readTexture(device, small, 64, 64)
+    // Flipped: row 0 of the texture is the bottom (green) half of the image.
+    assertColor(pixelAt(pixels, 64, 0, 0), [0, 255, 0], "top-left")
+    assertColor(pixelAt(pixels, 64, 63, 0), [0, 255, 0], "top-right")
+    assertColor(pixelAt(pixels, 64, 0, 63), [255, 0, 0], "bottom-left")
+    assertColor(pixelAt(pixels, 64, 63, 63), [255, 0, 0], "bottom-right")
+    small.destroy()
+    spark.dispose()
+  })
+  device.destroy()
+})
+
+const CONSISTENCY_SHAPES = [
+  [1024, 256],
+  [128, 64]
+]
+
+// Encode each shape with mipmaps and decode every level.
+async function encodeAndDecodeAll(device, spark, images, options) {
+  const results = []
+  for (const image of images) {
+    const texture = await spark.encodeTexture(image, { format: "rgb", generateMipmaps: true, ...options })
+    const levels = []
+    for (let level = 0; level < texture.mipLevelCount; level++) {
+      const w = Math.max(1, image.width >> level)
+      const h = Math.max(1, image.height >> level)
+      levels.push(await readTexture(device, texture, w, h, level))
+    }
+    texture.destroy()
+    results.push(levels)
+  }
+  return results
+}
+
+for (const mipmapFilter of ["box", "magic"]) {
+  test(`Spark: cacheTempResources does not change the encoded result (${mipmapFilter} filter)`, async () => {
+    const device = await createDevice()
+    const images = await Promise.all(CONSISTENCY_SHAPES.map(([w, h], i) => makeNoiseImage(w, h, i + 1)))
+
+    await expectNoValidationErrors(device, async () => {
+      const plain = await Spark.create(device)
+      const expected = await encodeAndDecodeAll(device, plain, images, { mipmapFilter })
+      plain.dispose()
+
+      // Size the cache with a large, contrasting encode first, then encode the test shapes.
+      const cached = await Spark.create(device, { cacheTempResources: true })
+      const big = await cached.encodeTexture(await makeSolidImage(1024, "#ff00ff"), { format: "rgb", generateMipmaps: true })
+      big.destroy()
+      const actual = await encodeAndDecodeAll(device, cached, images, { mipmapFilter })
+      cached.dispose()
+
+      for (let i = 0; i < images.length; i++) {
+        assert.equal(actual[i].length, expected[i].length, `mip count differs for ${images[i].width}x${images[i].height}`)
+        for (let level = 0; level < expected[i].length; level++) {
+          const diff = firstDifference(actual[i][level], expected[i][level])
+          assert.ok(!diff, `${images[i].width}x${images[i].height} level ${level}: ${diff}`)
+        }
+      }
+    })
+    device.destroy()
+  })
+}

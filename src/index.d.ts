@@ -10,17 +10,19 @@
  */
 export interface SparkCacheOptions {
   /**
-   * Minimum width and height (in texels) that cached resources are allocated for, so that a
-   * sequence of encodes of increasing size up to this value does not reallocate them.
-   * Encodes larger than this still grow the cache. Clamped to the device's maximum texture size.
+   * Minimum width and height (in texels) that the cached block-level resources (render
+   * targets and buffers) are allocated for, so that a sequence of encodes of increasing size
+   * up to this value does not reallocate them. Encodes larger than this still grow the cache.
+   * Does not apply to the cached source texture, which is only reused for images of exactly
+   * the same size. Clamped to the device's maximum texture size.
    * @default 0 (size of the encode that triggers the allocation)
    */
   minSize?: number
 
   /**
-   * Allocate cached resources with a full mip chain even when the encode that triggers the
-   * allocation does not generate mipmaps. Avoids a reallocation the first time a mipmapped
-   * encode is requested, at the cost of ~33% more memory for the source texture.
+   * Allocate the cached source texture with a full mip chain even when the encode that
+   * triggers the allocation does not generate mipmaps. Avoids a reallocation the first time a
+   * mipmapped encode of the same size is requested, at the cost of ~33% more memory.
    * @default false
    */
   allocateMipmaps?: boolean
