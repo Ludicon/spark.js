@@ -1,5 +1,5 @@
 import { SparkGL } from "../../src/index.js"
-import { test, assert, skip, isSoftwareGL } from "../harness.js"
+import { test, assert, skip, isSoftwareGL, makeSolidImage } from "../harness.js"
 import { trackGL } from "../gl-tracker.js"
 
 function createGL() {
@@ -7,14 +7,6 @@ function createGL() {
   if (!gl) skip("WebGL2 not available")
   if (isSoftwareGL(gl)) skip("compressed mip levels are not reliable on software GL")
   return trackGL(gl)
-}
-
-async function makeSolidImage(size, color) {
-  const canvas = new OffscreenCanvas(size, size)
-  const ctx = canvas.getContext("2d")
-  ctx.fillStyle = color
-  ctx.fillRect(0, 0, size, size)
-  return createImageBitmap(canvas)
 }
 
 // Decode one mip level of a compressed texture back to RGBA8 by rendering it with texelFetch.
@@ -65,6 +57,7 @@ function readMipLevel(gl, texture, level, width, height) {
 
   gl.deleteFramebuffer(fbo)
   gl.deleteTexture(target)
+  gl.useProgram(null)
   gl.deleteProgram(program)
   gl.deleteShader(vsShader)
   gl.deleteShader(fsShader)
@@ -84,7 +77,7 @@ test("SparkGL: cached source texture is reused correctly for a smaller image wit
   const tracker = createGL()
   const gl = tracker.gl
   const spark = SparkGL.create(gl, { cacheTempResources: true })
-  const format = spark.getSupportedFormats()[0]
+  const format = "rgb"
 
   // First encode sizes the cache at 32x32 with 4 mip levels and leaves the source texture dirty.
   const red = await spark.encodeTexture(await makeSolidImage(32, "#ff0000"), { format, generateMipmaps: true })
@@ -110,7 +103,7 @@ test("SparkGL: cached source texture is reallocated for a larger image", async (
   const tracker = createGL()
   const gl = tracker.gl
   const spark = SparkGL.create(gl, { cacheTempResources: true })
-  const format = spark.getSupportedFormats()[0]
+  const format = "rgb"
 
   const small = await spark.encodeTexture(await makeSolidImage(16, "#ff0000"), { format })
   gl.deleteTexture(small.texture)
@@ -142,7 +135,7 @@ test("SparkGL: minSize allocates once for a sequence of growing encodes", async 
   const tracker = createGL()
   const gl = tracker.gl
   const spark = SparkGL.create(gl, { cacheTempResources: { minSize: 512 } })
-  const format = spark.getSupportedFormats()[0]
+  const format = "rgb"
 
   const first = await spark.encodeTexture(await makeSolidImage(64, "#ff0000"), { format })
   gl.deleteTexture(first.texture)
@@ -169,7 +162,7 @@ test("SparkGL: allocateMipmaps avoids reallocation when mipmaps are requested la
   const tracker = createGL()
   const gl = tracker.gl
   const spark = SparkGL.create(gl, { cacheTempResources: { minSize: 64, allocateMipmaps: true } })
-  const format = spark.getSupportedFormats()[0]
+  const format = "rgb"
 
   const flat = await spark.encodeTexture(await makeSolidImage(64, "#ff0000"), { format })
   gl.deleteTexture(flat.texture)
@@ -188,7 +181,7 @@ test("SparkGL: without allocateMipmaps the source texture is reallocated once fo
   const tracker = createGL()
   const gl = tracker.gl
   const spark = SparkGL.create(gl, { cacheTempResources: { minSize: 64 } })
-  const format = spark.getSupportedFormats()[0]
+  const format = "rgb"
 
   const flat = await spark.encodeTexture(await makeSolidImage(64, "#ff0000"), { format })
   gl.deleteTexture(flat.texture)
