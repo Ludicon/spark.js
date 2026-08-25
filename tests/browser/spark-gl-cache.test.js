@@ -126,3 +126,95 @@ test("SparkGL: cached source texture is reallocated for a larger image", async (
   await spark.dispose()
   assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
 })
+
+// Count createTexture calls: handle counting alone cannot see a delete+create reallocation.
+function countTextureCreations(gl) {
+  const counter = { count: 0 }
+  const raw = gl.createTexture
+  gl.createTexture = () => {
+    counter.count++
+    return raw.call(gl)
+  }
+  return counter
+}
+
+test("SparkGL: minSize allocates once for a sequence of growing encodes", async () => {
+  const tracker = createGL()
+  const gl = tracker.gl
+  const spark = SparkGL.create(gl, { cacheTempResources: { minSize: 512 } })
+  const format = spark.getSupportedFormats()[0]
+
+  const first = await spark.encodeTexture(await makeSolidImage(64, "#ff0000"), { format })
+  gl.deleteTexture(first.texture)
+
+  const created = countTextureCreations(gl)
+  for (const size of [128, 256, 512]) {
+    const result = await spark.encodeTexture(await makeSolidImage(size, "#00ff00"), { format })
+    assertSolid(readMipLevel(gl, result.texture, 0, size, size), [0, 255, 0], `${size} level 0`)
+    gl.deleteTexture(result.texture)
+  }
+  // readMipLevel creates one texture per call; plus one output per encode.
+  assert.equal(created.count, 6, `cache was reallocated: ${created.count} textures created`)
+
+  // Larger than minSize still grows the cache.
+  const big = await spark.encodeTexture(await makeSolidImage(1024, "#0000ff"), { format })
+  assertSolid(readMipLevel(gl, big.texture, 0, 1024, 1024), [0, 0, 255], "1024 level 0")
+  gl.deleteTexture(big.texture)
+
+  await spark.dispose()
+  assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
+})
+
+test("SparkGL: allocateMipmaps avoids reallocation when mipmaps are requested later", async () => {
+  const tracker = createGL()
+  const gl = tracker.gl
+  const spark = SparkGL.create(gl, { cacheTempResources: { minSize: 64, allocateMipmaps: true } })
+  const format = spark.getSupportedFormats()[0]
+
+  const flat = await spark.encodeTexture(await makeSolidImage(64, "#ff0000"), { format })
+  gl.deleteTexture(flat.texture)
+
+  const created = countTextureCreations(gl)
+  const mipped = await spark.encodeTexture(await makeSolidImage(32, "#00ff00"), { format, generateMipmaps: true })
+  assert.equal(created.count, 1, "expected only the output texture to be created")
+  assertSolid(readMipLevel(gl, mipped.texture, 2, 8, 8), [0, 255, 0], "green level 2")
+  gl.deleteTexture(mipped.texture)
+
+  await spark.dispose()
+  assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
+})
+
+test("SparkGL: without allocateMipmaps the source texture is reallocated once for mipmaps", async () => {
+  const tracker = createGL()
+  const gl = tracker.gl
+  const spark = SparkGL.create(gl, { cacheTempResources: { minSize: 64 } })
+  const format = spark.getSupportedFormats()[0]
+
+  const flat = await spark.encodeTexture(await makeSolidImage(64, "#ff0000"), { format })
+  gl.deleteTexture(flat.texture)
+
+  const created = countTextureCreations(gl)
+  const mipped = await spark.encodeTexture(await makeSolidImage(32, "#00ff00"), { format, generateMipmaps: true })
+  assert.equal(created.count, 2, "expected output texture plus one source reallocation")
+  gl.deleteTexture(mipped.texture)
+
+  // The reallocated chain is sized for minSize, so a mipmapped 64x64 reuses it.
+  const again = await spark.encodeTexture(await makeSolidImage(64, "#0000ff"), { format, generateMipmaps: true })
+  assert.equal(created.count, 3, "expected no further reallocation")
+  assertSolid(readMipLevel(gl, again.texture, 3, 8, 8), [0, 0, 255], "blue level 3")
+  gl.deleteTexture(again.texture)
+
+  await spark.dispose()
+  assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
+})
+
+test("SparkGL: invalid minSize is rejected", async () => {
+  const tracker = createGL()
+  let threw = false
+  try {
+    SparkGL.create(tracker.gl, { cacheTempResources: { minSize: -1 } })
+  } catch {
+    threw = true
+  }
+  assert.ok(threw, "expected an error for negative minSize")
+})

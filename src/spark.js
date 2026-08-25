@@ -1,5 +1,5 @@
 import shaders from "./shaders/wgsl-shaders.js"
-import { assert, loadImage, loadImageFromBlob, getSafariVersion, getFirefoxVersion } from "./utils.js"
+import { assert, loadImage, loadImageFromBlob, getSafariVersion, getFirefoxVersion, parseCacheTempResources } from "./utils.js"
 
 const SparkFormat = {
   ASTC_4x4_RGB: 0,
@@ -274,6 +274,8 @@ class Spark {
   #queryReadbackBuffer
 
   #cacheTempResources = false
+  #cacheMinSize = 0 // Minimum width/height cached resources are allocated for
+  #cacheAllocateMipmaps = false // Allocate a full mip chain for cached resources
   #cachedInputTexture = null
   #cachedTmpTexture = null
   #cachedOutputBuffer = null
@@ -286,7 +288,7 @@ class Spark {
    * @param {GPUDevice} device - WebGPU device.
    * @param {Object} options - Encoder options.
    * @param {boolean} options.preload - Whether to preload all encoder pipelines (false by default).
-   * @param {boolean} options.cacheTempResources - Whether to cache temporary resources for reuse across encodeTexture calls (false by default).
+   * @param {boolean|{minSize?: number, allocateMipmaps?: boolean}} options.cacheTempResources - Whether to cache temporary resources for reuse across encodeTexture calls (false by default). An object enables caching and hints how cached resources are allocated.
    * @param {boolean} options.verbose - Whether to enable verbose logging (false by default).
    * @returns {Promise<void>} Resolves when initialization is complete.
    */
@@ -668,9 +670,14 @@ class Spark {
         if (this.#cacheTempResources && this.#cachedInputTexture) {
           this.#cachedInputTexture.destroy()
         }
+        // When caching, honor the minimum size and mipmap allocation hints.
+        const allocWidth = Math.max(width, this.#cacheMinSize)
+        const allocHeight = Math.max(height, this.#cacheMinSize)
+        const allocMipmaps = mipmaps || this.#cacheAllocateMipmaps
+        const allocMipLevelCount = allocMipmaps ? computeMipmapLayout(allocWidth, allocHeight, blockSize, true).mipmapCount : 1
         inputTexture = this.#device.createTexture({
-          size: [width, height, 1],
-          mipLevelCount: mipmapCount,
+          size: [allocWidth, allocHeight, 1],
+          mipLevelCount: allocMipLevelCount,
           format: inputFormat,
           usage: inputUsage,
           ...(inputViewFormats ? { viewFormats: inputViewFormats } : {})
@@ -702,7 +709,7 @@ class Spark {
             this.#cachedTmpTexture.destroy()
           }
           tmpTexture = this.#device.createTexture({
-            size: [srcWidth, srcHeight, 1],
+            size: [Math.max(srcWidth, this.#cacheMinSize), Math.max(srcHeight, this.#cacheMinSize), 1],
             mipLevelCount: 1,
             format: inputFormat,
             // RENDER_ATTACHMENT usage is necessary for copyExternalImageToTexture
@@ -768,8 +775,15 @@ class Spark {
       if (this.#cacheTempResources && this.#cachedOutputBuffer) {
         this.#cachedOutputBuffer.destroy()
       }
+      // With a minimum cache size, allocate enough for that size (with a mip chain if hinted).
+      let allocSize = outputSize
+      if (this.#cacheMinSize > 0) {
+        const allocMipmaps = mipmaps || this.#cacheAllocateMipmaps
+        const minLayout = computeMipmapLayout(this.#cacheMinSize, this.#cacheMinSize, blockSize, allocMipmaps)
+        allocSize = Math.max(outputSize, minLayout.outputSize)
+      }
       outputBuffer = this.#device.createBuffer({
-        size: outputSize,
+        size: allocSize,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
       })
       if (this.#cacheTempResources) {
@@ -935,7 +949,10 @@ class Spark {
 
     this.#device = device
     this.#verbose = verbose
-    this.#cacheTempResources = cacheTempResources
+    const cache = parseCacheTempResources(cacheTempResources)
+    this.#cacheTempResources = cache.enabled
+    this.#cacheMinSize = Math.min(cache.minSize, device.limits.maxTextureDimension2D)
+    this.#cacheAllocateMipmaps = cache.allocateMipmaps
     // Core devices expose the "core-features-and-limits" feature; compat devices don't.
     this.#compatibilityMode = !device.features.has("core-features-and-limits")
     // When supported, texture-compression-unaligned lifts the block alignment requirement.

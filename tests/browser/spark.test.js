@@ -51,3 +51,60 @@ test("Spark: dispose with timestamp queries enabled", async () => {
   })
   device.destroy()
 })
+
+// Count texture/buffer allocations made through the device.
+function countAllocations(device) {
+  const counts = { textures: 0, buffers: 0 }
+  const createTexture = device.createTexture.bind(device)
+  const createBuffer = device.createBuffer.bind(device)
+  device.createTexture = desc => {
+    counts.textures++
+    return createTexture(desc)
+  }
+  device.createBuffer = desc => {
+    counts.buffers++
+    return createBuffer(desc)
+  }
+  return counts
+}
+
+test("Spark: minSize allocates once for a sequence of growing encodes", async () => {
+  const device = await createDevice()
+  const spark = await Spark.create(device, { cacheTempResources: { minSize: 512 } })
+  const format = spark.getSupportedFormats()[0]
+
+  await expectNoValidationErrors(device, async () => {
+    const first = await spark.encodeTexture(await makeTestImage(64, 64), { format })
+    first.destroy()
+
+    const counts = countAllocations(device)
+    for (const size of [128, 256, 512]) {
+      const result = await spark.encodeTexture(await makeTestImage(size, size), { format })
+      result.destroy()
+    }
+    // One output texture per encode, no cache reallocations.
+    assert.equal(counts.textures, 3, `unexpected texture allocations: ${counts.textures}`)
+    assert.equal(counts.buffers, 0, `unexpected buffer allocations: ${counts.buffers}`)
+    spark.dispose()
+  })
+  device.destroy()
+})
+
+test("Spark: allocateMipmaps avoids reallocation when mipmaps are requested later", async () => {
+  const device = await createDevice()
+  const spark = await Spark.create(device, { cacheTempResources: { minSize: 64, allocateMipmaps: true } })
+  const format = spark.getSupportedFormats()[0]
+
+  await expectNoValidationErrors(device, async () => {
+    const flat = await spark.encodeTexture(await makeTestImage(64, 64), { format })
+    flat.destroy()
+
+    const counts = countAllocations(device)
+    const mipped = await spark.encodeTexture(await makeTestImage(32, 32), { format, generateMipmaps: true })
+    mipped.destroy()
+    assert.equal(counts.textures, 1, `unexpected texture allocations: ${counts.textures}`)
+    assert.equal(counts.buffers, 0, `unexpected buffer allocations: ${counts.buffers}`)
+    spark.dispose()
+  })
+  device.destroy()
+})

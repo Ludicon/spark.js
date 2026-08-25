@@ -1,6 +1,6 @@
 // WebGL implementation of spark.js texture compression API
 import glslShaders from "./shaders/glsl-shaders.js"
-import { assert, loadImage, loadImageFromBlob } from "./utils.js"
+import { assert, loadImage, loadImageFromBlob, parseCacheTempResources } from "./utils.js"
 
 const SparkFormat = {
   ASTC_4x4_RGB: 0,
@@ -293,6 +293,21 @@ function createProgram(gl, vertexShader, fragmentShader, validate) {
   return program
 }
 
+// Let's not waste time generating mips below this size:
+const MIN_MIP_SIZE = 4
+
+function computeMipmapCount(width, height) {
+  let mipmapCount = 1
+  let w = width
+  let h = height
+  while (w > MIN_MIP_SIZE || h > MIN_MIP_SIZE) {
+    mipmapCount++
+    w = Math.max(1, Math.floor(w / 2))
+    h = Math.max(1, Math.floor(h / 2))
+  }
+  return mipmapCount
+}
+
 export class SparkGL {
   #gl
   #supportedFormats
@@ -303,6 +318,8 @@ export class SparkGL {
   #encodeCounter = 0
   #fullscreenVertexShader
   #cacheTempResources = false
+  #cacheMinSize = 0 // Minimum width/height cached resources are allocated for
+  #cacheAllocateMipmaps = false // Allocate a full mip chain for cached resources
   // Cached temporary resources for encodeTexture
   #cachedBuffer = null
   #cachedBufferSize = 0
@@ -325,7 +342,10 @@ export class SparkGL {
     this.#gl = gl
     this.#verbose = options.verbose ?? false
     this.#validateShaders = options.validateShaders ?? false
-    this.#cacheTempResources = options.cacheTempResources ?? false
+    const cache = parseCacheTempResources(options.cacheTempResources)
+    this.#cacheTempResources = cache.enabled
+    this.#cacheMinSize = Math.min(cache.minSize, gl.getParameter(gl.MAX_TEXTURE_SIZE))
+    this.#cacheAllocateMipmaps = cache.allocateMipmaps
     this.#supportedFormats = detectWebGLFormats(gl, this.#verbose)
 
     // Handle preload option
@@ -628,17 +648,7 @@ export class SparkGL {
 
     // Determine mipmap count
     const generateMipmaps = options.generateMipmaps || options.mips
-    let mipmapCount = 1
-    if (generateMipmaps) {
-      const MIN_MIP_SIZE = 4
-      let w = width
-      let h = height
-      while (w > MIN_MIP_SIZE || h > MIN_MIP_SIZE) {
-        mipmapCount++
-        w = Math.max(1, Math.floor(w / 2))
-        h = Math.max(1, Math.floor(h / 2))
-      }
-    }
+    const mipmapCount = generateMipmaps ? computeMipmapCount(width, height) : 1
 
     const cacheTempResources = this.#cacheTempResources
 
@@ -660,14 +670,19 @@ export class SparkGL {
       if (cacheTempResources && this.#cachedSrcTexture) {
         gl.deleteTexture(this.#cachedSrcTexture)
       }
+      // When caching, honor the minimum size and mipmap allocation hints.
+      const allocWidth = Math.max(width, this.#cacheMinSize)
+      const allocHeight = Math.max(height, this.#cacheMinSize)
+      const allocMipmaps = generateMipmaps || this.#cacheAllocateMipmaps
+      const allocMipLevelCount = allocMipmaps ? computeMipmapCount(allocWidth, allocHeight) : 1
       srcTexture = gl.createTexture()
       gl.bindTexture(gl.TEXTURE_2D, srcTexture)
-      gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, gl.RGBA8, width, height)
+      gl.texStorage2D(gl.TEXTURE_2D, allocMipLevelCount, gl.RGBA8, allocWidth, allocHeight)
       if (cacheTempResources) {
         this.#cachedSrcTexture = srcTexture
-        this.#cachedSrcWidth = width
-        this.#cachedSrcHeight = height
-        this.#cachedSrcMipLevelCount = mipmapCount
+        this.#cachedSrcWidth = allocWidth
+        this.#cachedSrcHeight = allocHeight
+        this.#cachedSrcMipLevelCount = allocMipLevelCount
       }
     }
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
@@ -719,6 +734,12 @@ export class SparkGL {
     const dstBufferSize = blockSize * bw * bh
     let byteLength = dstBufferSize
 
+    // Minimum allocation size for cached block resources.
+    const minBlocks = Math.ceil(this.#cacheMinSize / 4)
+    const minBw = Math.max(bw, minBlocks)
+    const minBh = Math.max(bh, minBlocks)
+    const allocBufferSize = blockSize * minBw * minBh
+
     // Create or reuse temporary buffer.
     let dstBuffer
     if (cacheTempResources && this.#cachedBuffer && this.#cachedBufferSize >= dstBufferSize) {
@@ -728,18 +749,17 @@ export class SparkGL {
         gl.deleteBuffer(this.#cachedBuffer)
       }
       dstBuffer = gl.createBuffer()
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, dstBuffer)
+      gl.bufferData(gl.PIXEL_PACK_BUFFER, cacheTempResources ? allocBufferSize : dstBufferSize, gl.STREAM_COPY)
       if (cacheTempResources) {
         this.#cachedBuffer = dstBuffer
-        this.#cachedBufferSize = dstBufferSize
+        this.#cachedBufferSize = allocBufferSize
       }
     }
     // We bind it to PIXEL_PACK_BUFFER to copy the render target into it.
     // We bind it to PIXEL_UNPACK_BUFFER to copy the contents to the compressed texture.
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, dstBuffer)
     gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, dstBuffer)
-
-    // @@ Can we skip this call?
-    gl.bufferData(gl.PIXEL_PACK_BUFFER, dstBufferSize, gl.STREAM_COPY)
 
     // Create or reuse render target (uint) texture.
     // Need different textures for 8-byte and 16-byte per block formats.
@@ -756,11 +776,11 @@ export class SparkGL {
         }
         mipDstTexture = gl.createTexture()
         gl.bindTexture(gl.TEXTURE_2D, mipDstTexture)
-        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, bw, bh)
+        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, minBw, minBh)
         if (cacheTempResources) {
           this.#cachedTexture8 = mipDstTexture
-          this.#cachedTexture8Width = bw
-          this.#cachedTexture8Height = bh
+          this.#cachedTexture8Width = minBw
+          this.#cachedTexture8Height = minBh
         }
       }
     } else {
@@ -774,11 +794,11 @@ export class SparkGL {
         }
         mipDstTexture = gl.createTexture()
         gl.bindTexture(gl.TEXTURE_2D, mipDstTexture)
-        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, bw, bh)
+        gl.texStorage2D(gl.TEXTURE_2D, 1, glUintFormat, minBw, minBh)
         if (cacheTempResources) {
           this.#cachedTexture16 = mipDstTexture
-          this.#cachedTexture16Width = bw
-          this.#cachedTexture16Height = bh
+          this.#cachedTexture16Width = minBw
+          this.#cachedTexture16Height = minBh
         }
       }
     }
