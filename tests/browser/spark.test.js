@@ -109,8 +109,8 @@ test("Spark: allocateMipmaps avoids reallocation when mipmaps are requested late
   device.destroy()
 })
 
-// Decode mip level 0 of a compressed texture to RGBA8 by sampling it in a render pass.
-async function readTexture(device, texture, width, height) {
+// Decode one mip level of a compressed texture to RGBA8 by sampling it in a render pass.
+async function readTexture(device, texture, width, height, level = 0) {
   const module = device.createShaderModule({
     code: `
       @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
@@ -136,7 +136,7 @@ async function readTexture(device, texture, width, height) {
   const buffer = device.createBuffer({ size: bytesPerRow * height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
   const bindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
-    entries: [{ binding: 0, resource: texture.createView({ baseMipLevel: 0, mipLevelCount: 1 }) }]
+    entries: [{ binding: 0, resource: texture.createView({ baseMipLevel: level, mipLevelCount: 1 }) }]
   })
 
   const encoder = device.createCommandEncoder()
@@ -187,6 +187,41 @@ test("Spark: concurrent encodes with cacheTempResources do not interfere", async
     assertSolid(await readTexture(device, green, 128, 128), [0, 255, 0], "green")
     red.destroy()
     green.destroy()
+    spark.dispose()
+  })
+  device.destroy()
+})
+
+function assertAlpha(pixels, expected, label, tolerance = 8) {
+  for (let i = 3; i < pixels.length; i += 4) {
+    if (Math.abs(pixels[i] - expected) > tolerance) {
+      throw new Error(`${label}: pixel ${(i - 3) / 4} alpha is ${pixels[i]}, expected ${expected}`)
+    }
+  }
+}
+
+test("Spark: mipsAlphaScale applies a different scale to each mip level", async () => {
+  const device = await createDevice()
+  const spark = await Spark.create(device)
+
+  await expectNoValidationErrors(device, async () => {
+    // Solid white at 50% alpha; levels are 32, 16, 8, 4.
+    const image = await makeSolidImage(32, "rgba(255, 255, 255, 0.5)")
+    const texture = await spark.encodeTexture(image, {
+      format: "rgba",
+      generateMipmaps: true,
+      mipmapFilter: "box",
+      mipsAlphaScale: [1.0, 0.5]
+    })
+    assert.equal(texture.mipLevelCount, 4, "unexpected mip count")
+
+    // Each level is derived from the previous one, so the scales compound:
+    // level 1 = 128 * 1.0, level 2 = 128 * 0.5, level 3 = 64 * 0.5 (last scale repeats).
+    assertAlpha(await readTexture(device, texture, 32, 32, 0), 128, "level 0")
+    assertAlpha(await readTexture(device, texture, 16, 16, 1), 128, "level 1")
+    assertAlpha(await readTexture(device, texture, 8, 8, 2), 64, "level 2")
+    assertAlpha(await readTexture(device, texture, 4, 4, 3), 32, "level 3")
+    texture.destroy()
     spark.dispose()
   })
   device.destroy()

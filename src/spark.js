@@ -226,6 +226,12 @@ function imageToByteArray(image) {
 // This is prescribed by WebGPU.
 const BYTES_PER_ROW_ALIGNMENT = 256
 
+// The uniform buffer holds one Params slot per mip level so that all levels of an encode can
+// be recorded before the command buffer is submitted. Slots are spaced by the device's
+// minUniformBufferOffsetAlignment; Params itself is 8 bytes.
+const UNIFORM_SLOT_SIZE = 8
+const UNIFORM_SLOT_COUNT = 16 // Enough for a 16384x16384 texture with a full mip chain.
+
 // Let's not waste time generating mips below this size:
 const MIN_MIP_SIZE = 4
 
@@ -269,6 +275,7 @@ class Spark {
 
   #defaultSampler
   #uniformBuffer
+  #uniformSlotStride = 256
   #querySet
   #queryBuffer
   #queryReadbackBuffer
@@ -964,8 +971,10 @@ class Spark {
     })
 
     // Create uniform buffer for the mipmap shader.
+    // 256 unless the caller requested a smaller minUniformBufferOffsetAlignment for the device.
+    this.#uniformSlotStride = this.#device.limits.minUniformBufferOffsetAlignment
     this.#uniformBuffer = this.#device.createBuffer({
-      size: 16,
+      size: this.#uniformSlotStride * UNIFORM_SLOT_COUNT,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     })
 
@@ -1384,21 +1393,25 @@ class Spark {
     return 3
   }
 
-  #updateUniformBuffer(colorMode, mipsAlphaScale, level) {
-    // Get alpha scale for this mip level
-    const alphaScale =
-      mipsAlphaScale && mipsAlphaScale.length > 0
-        ? level < mipsAlphaScale.length
-          ? mipsAlphaScale[level]
-          : mipsAlphaScale[mipsAlphaScale.length - 1]
-        : 1.0
+  // Write Params for one slot of the uniform buffer. Slot 0 is used by passes that don't scale
+  // alpha; mip level i (i >= 1) uses slot i so each level's pass reads its own alpha scale.
+  #updateUniformBuffer(slot, colorMode, alphaScale = 1.0) {
+    assert(slot < UNIFORM_SLOT_COUNT, "too many mip levels")
 
-    const uniformData = new ArrayBuffer(8)
+    const uniformData = new ArrayBuffer(UNIFORM_SLOT_SIZE)
     const uniformDataView = new DataView(uniformData)
     uniformDataView.setUint32(0, colorMode, true)
     uniformDataView.setFloat32(4, alphaScale, true)
 
-    this.#device.queue.writeBuffer(this.#uniformBuffer, 0, uniformData)
+    this.#device.queue.writeBuffer(this.#uniformBuffer, slot * this.#uniformSlotStride, uniformData)
+  }
+
+  // Bind group entry for one slot of the uniform buffer.
+  #uniformBinding(slot) {
+    return {
+      binding: 3,
+      resource: { buffer: this.#uniformBuffer, offset: slot * this.#uniformSlotStride, size: UNIFORM_SLOT_SIZE }
+    }
   }
 
   // Apply scaling and flipY transform.
@@ -1408,7 +1421,7 @@ class Spark {
       return
     }
 
-    this.#updateUniformBuffer(colorMode)
+    this.#updateUniformBuffer(0, colorMode)
 
     const pass = encoder.beginComputePass()
 
@@ -1442,10 +1455,7 @@ class Spark {
           binding: 2,
           resource: this.#defaultSampler
         },
-        {
-          binding: 3,
-          resource: { buffer: this.#uniformBuffer }
-        }
+        this.#uniformBinding(0)
       ]
     })
 
@@ -1478,7 +1488,7 @@ class Spark {
       ]
     })
 
-    this.#updateUniformBuffer(colorMode)
+    this.#updateUniformBuffer(0, colorMode)
 
     const pipeline = flipY ? this.#flipYPipeline[format] : this.#resizePipeline[format]
     pass.setPipeline(pipeline)
@@ -1499,10 +1509,7 @@ class Spark {
           binding: 2,
           resource: this.#defaultSampler
         },
-        {
-          binding: 3,
-          resource: { buffer: this.#uniformBuffer }
-        }
+        this.#uniformBinding(0)
       ]
     })
 
@@ -1512,18 +1519,28 @@ class Spark {
     pass.end()
   }
 
-  async #generateMipmaps(encoder, texture, mipmapCount, width, height, colorMode, mipsAlphaScale, mipmapFilter) {
-    if (mipsAlphaScale == undefined) this.#updateUniformBuffer(colorMode)
+  #generateMipmaps(encoder, texture, mipmapCount, width, height, colorMode, mipsAlphaScale, mipmapFilter) {
+    // Each destination level gets its own uniform slot so all levels can be recorded up front.
+    // Without per-level alpha scaling every level shares slot 0.
+    const hasAlphaScale = mipsAlphaScale != undefined && mipsAlphaScale.length > 0
+    const slotForLevel = level => (hasAlphaScale ? level : 0)
+    const alphaScaleForLevel = level => (hasAlphaScale ? mipsAlphaScale[Math.min(level - 1, mipsAlphaScale.length - 1)] : 1.0)
+
+    if (hasAlphaScale) {
+      for (let level = 1; level < mipmapCount; level++) {
+        this.#updateUniformBuffer(level, colorMode, alphaScaleForLevel(level))
+      }
+    } else {
+      this.#updateUniformBuffer(0, colorMode)
+    }
 
     let w = width
     let h = height
     if (this.#useFragmentShader) {
-      for (let i = 0; i < mipmapCount - 1; i++) {
-        if (mipsAlphaScale != undefined) this.#updateUniformBuffer(colorMode, mipsAlphaScale, i)
-
+      for (let level = 1; level < mipmapCount; level++) {
         w = Math.max(1, Math.floor(w / 2))
         h = Math.max(1, Math.floor(h / 2))
-        this.#generateMipLevelFragmentShader(encoder, texture, i, i + 1, w, h, colorMode)
+        this.#generateMipLevelFragmentShader(encoder, texture, level - 1, level, w, h, colorMode, slotForLevel(level))
       }
     } else {
       const pass = encoder.beginComputePass()
@@ -1533,19 +1550,17 @@ class Spark {
 
       pass.setPipeline(pipeline)
 
-      for (let i = 0; i < mipmapCount - 1; i++) {
-        if (mipsAlphaScale != undefined) this.#updateUniformBuffer(colorMode, mipsAlphaScale, i)
-
+      for (let level = 1; level < mipmapCount; level++) {
         w = Math.max(1, Math.floor(w / 2))
         h = Math.max(1, Math.floor(h / 2))
-        this.#generateMipLevel(pass, layout, texture, i, i + 1, w, h, colorMode)
+        this.#generateMipLevel(pass, layout, texture, level - 1, level, w, h, colorMode, slotForLevel(level))
       }
 
       pass.end()
     }
   }
 
-  #generateMipLevel(pass, layout, texture, srcLevel, dstLevel, width, height, colorMode) {
+  #generateMipLevel(pass, layout, texture, srcLevel, dstLevel, width, height, colorMode, slot) {
     const bindGroup = this.#device.createBindGroup({
       layout: layout,
       entries: [
@@ -1572,10 +1587,7 @@ class Spark {
           binding: 2,
           resource: this.#defaultSampler
         },
-        {
-          binding: 3,
-          resource: { buffer: this.#uniformBuffer }
-        }
+        this.#uniformBinding(slot)
       ]
     })
 
@@ -1583,7 +1595,7 @@ class Spark {
     pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8))
   }
 
-  #generateMipLevelFragmentShader(encoder, texture, srcLevel, dstLevel, width, height, colorMode) {
+  #generateMipLevelFragmentShader(encoder, texture, srcLevel, dstLevel, width, height, colorMode, slot) {
     const format = texture.format + ((colorMode & ColorMode.sRGB) != 0 ? "-srgb" : "")
 
     const dstView = texture.createView({
@@ -1621,10 +1633,7 @@ class Spark {
           binding: 2,
           resource: this.#defaultSampler
         },
-        {
-          binding: 3,
-          resource: { buffer: this.#uniformBuffer }
-        }
+        this.#uniformBinding(slot)
       ]
     })
 
