@@ -1,0 +1,32 @@
+name: Cleanup Branch Deploy
+
+on:
+  delete:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.ref_type == 'branch' && github.event.ref != 'main'
+    steps:
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+
+      - name: Remove branch directory
+        run: |
+          BRANCH_SLUG=$(echo "${{ github.event.ref }}" | sed 's/[^a-zA-Z0-9._-]/-/g')
+          DEPLOY_DIR="branches/${BRANCH_SLUG}"
+          if [ -d "$DEPLOY_DIR" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git rm -rf "$DEPLOY_DIR"
+            git commit -m "Clean up deploy for branch: ${{ github.event.ref }}"
+            git push
+            echo "Removed ${DEPLOY_DIR}"
+          else
+            echo "No deploy directory found for branch: ${{ github.event.ref }}"
+          fi

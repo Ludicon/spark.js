@@ -2,32 +2,43 @@ name: Deploy Examples to GitHub Pages
 
 on:
   push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: pages-${{ github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
-    environment: github-pages
+    environment:
+      name: ${{ github.ref_name == 'main' && 'github-pages' || 'preview' }}
+      url: https://ludicon.github.io${{ steps.config.outputs.base_path }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: "npm"
+
+      - name: Determine deploy path
+        id: config
+        run: |
+          if [ "$GITHUB_REF_NAME" = "main" ]; then
+            echo "base_path=/spark.js/" >> "$GITHUB_OUTPUT"
+            echo "is_branch=false" >> "$GITHUB_OUTPUT"
+          else
+            BRANCH_SLUG=$(echo "$GITHUB_REF_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
+            echo "base_path=/spark.js/branches/${BRANCH_SLUG}/" >> "$GITHUB_OUTPUT"
+            echo "target_folder=branches/${BRANCH_SLUG}" >> "$GITHUB_OUTPUT"
+            echo "is_branch=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -38,23 +49,25 @@ jobs:
       - name: Build examples
         run: npm run build:examples
         env:
+          BASE_PATH: ${{ steps.config.outputs.base_path }}
           VITE_ION_KEY: ${{ secrets.VITE_ION_KEY }}
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v4
+      - name: Deploy (main)
+        if: steps.config.outputs.is_branch == 'false'
+        uses: JamesIves/github-pages-deploy-action@v4
         with:
-          path: "./dist-examples"
+          folder: dist-examples
+          clean: true
+          clean-exclude: branches
 
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Deploy (branch)
+        if: steps.config.outputs.is_branch == 'true'
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: dist-examples
+          target-folder: ${{ steps.config.outputs.target_folder }}
+
+      - name: Output deployment URL
+        run: |
+          echo "## 🚀 Deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "**URL:** https://ludicon.github.io${{ steps.config.outputs.base_path }}" >> "$GITHUB_STEP_SUMMARY"
