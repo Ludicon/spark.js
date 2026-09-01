@@ -384,6 +384,12 @@ test("Spark: outputMipLevel validates the output texture", async () => {
     await assert.rejects(spark.encodeTexture(image, { ...options, outputMipLevel: 0 }), /requires an outputTexture/)
     await assert.rejects(spark.encodeTexture(image, { ...options, outputTexture: single, outputMipLevel: -1 }), /non-negative integer/)
 
+    // Levels smaller than a block are accepted: the 4-texel rounding only applies to level 0.
+    const chain = await spark.encodeTexture(image, { ...options, mipmapCount: 7 })
+    assert.equal(await spark.encodeTexture(await makeNoiseImage(2, 1, 2), { ...options, outputTexture: chain, outputMipLevel: 5 }), chain)
+    assert.equal(await spark.encodeTexture(await makeNoiseImage(1, 1, 3), { ...options, outputTexture: chain, outputMipLevel: 6 }), chain)
+    chain.destroy()
+
     // A texture spark cannot copy into is rejected too.
     const readOnly = device.createTexture({ size: [64, 32], format: single.format, usage: GPUTextureUsage.TEXTURE_BINDING })
     await assert.rejects(spark.encodeTexture(image, { ...options, outputTexture: readOnly, outputMipLevel: 0 }), /does not fit/)

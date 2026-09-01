@@ -611,10 +611,13 @@ class Spark {
     // call could overwrite or reallocate the cached textures and buffers underneath us.
     const pipeline = await this.#loadPipeline(format)
 
-    // Round up the size to meet WebGPU's 4-texel alignment requirement, unless the texture-compression-unaligned feature lifts it.
-    const width = this.#supportsUnalignedTextures ? srcWidth : Math.ceil(srcWidth / 4) * 4
-    const height = this.#supportsUnalignedTextures ? srcHeight : Math.ceil(srcHeight / 4) * 4
+    // Round up the size to meet WebGPU's 4-texel alignment requirement, unless the texture-compression-unaligned
+    // feature lifts it. Only the top mip level of a compressed texture is subject to it.
+    const alignment = this.#supportsUnalignedTextures || (options.outputMipLevel ?? 0) > 0 ? 1 : 4
+    const width = Math.ceil(srcWidth / alignment) * alignment
+    const height = Math.ceil(srcHeight / alignment) * alignment
     const blockSize = SparkBlockSize[format]
+
     // Determine mipmap counts: mipmapCount is the number of levels of the output texture,
     // encodedMipmapCount the number of levels this call writes (see resolveMipmapCount).
     const { mipmapCount, encodedMipmapCount } = resolveMipmapCount(options, width, height)
