@@ -22,7 +22,7 @@ This document describes the API for both `Spark` (WebGPU) and `SparkGL` (WebGL2)
 Both classes provide the same encoding API and options with some minor differences. The primary differences are:
 
 | Feature           | Spark (WebGPU)                        | SparkGL (WebGL2)                        |
-|-------------------|---------------------------------------|-----------------------------------------|
+| ----------------- | ------------------------------------- | --------------------------------------- |
 | Initialization    | `async Spark.create(device, options)` | `SparkGL.create(gl, options)`           |
 | `encodeTexture()` | Returns `GPUTexture`                  | Returns object with `.texture` property |
 
@@ -32,8 +32,6 @@ Both classes provide the same encoding API and options with some minor differenc
 - [`getSupportedFormats()`](#getsupportedformats--string) - Get list of supported compression formats
 - [`isFormatSupported(format)`](#isformatsupportedformat--boolean) - Check if a specific format is supported
 - [`freeTempResources()`](#freetempresources) - Free cached temporary GPU resources
-
-
 
 ---
 
@@ -60,6 +58,7 @@ const spark = await Spark.create(device, options)
 Creates a new Spark instance for WebGPU.
 
 **Parameters:**
+
 - `device` (`GPUDevice`) - WebGPU device with required features enabled
 - `options` (`Object`, optional) - Configuration options:
   - `preload` (`boolean` or `string[]`, default: `false`) - Whether to preload all or a subset of the encoder pipelines. Pipelines that are not preloaded are compiled on-demand when first used.
@@ -76,6 +75,7 @@ Compatibility-mode codepaths are auto-enabled when the device doesn't expose the
 Static method that inspects a WebGPU adapter and returns the list of features required by spark.js.
 
 **Parameters:**
+
 - `adapter` (`GPUAdapter`) - WebGPU adapter from `navigator.gpu.requestAdapter()`
 
 **Returns:** `string[]` - Array of feature names to request (e.g., `["texture-compression-bc", "texture-compression-astc"]`)
@@ -98,6 +98,7 @@ const spark = SparkGL.create(gl, options)
 Creates a new SparkGL instance for WebGL2.
 
 **Parameters:**
+
 - `gl` (`WebGL2RenderingContext`) - WebGL2 context. Required extensions are automatically enabled.
 - `options` (`Object`, optional) - Configuration options:
   - `preload` (`boolean` or `string[]`, default: `false`) - Whether to preload shader programs. Can be:
@@ -134,10 +135,8 @@ Loads an image and encodes it to a compressed GPU texture.
 
 - **`options`** (`Object`, optional)
   Configuration options for encoding:
-
   - **`format`** (`string`)
     Desired block compression format. The format can be specified in several different ways:
-
     - **Channel mask**: `"r"`, `"rg"`, `"rgb"`, `"rgba"` - Auto-selects the best format based on device capabilities.
 
     - **Explicit format**: An explicit format name: `"bc1-rgb"`, `"bc7-rgba"`, `"astc-4x4-rgb"`, `"etc2-rgb"`, `"eac-r"`, etc. See the [Supported Formats](#supported-formats)) for a list of supported formats.
@@ -145,7 +144,7 @@ Loads an image and encodes it to a compressed GPU texture.
     - **Substring**: `"bc1"`, `"bc7"`, `"astc"`, `"etc2"`, etc. - Chooses the first matching format.
 
     - **Auto-detect**: `"auto"` - Analyzes image to determine the channel count. This is available in WebGPU only and has some overhead. It's always recommended to specify the format through one of the other methods.
-    
+
     Default: `rgb`.
 
   - **`preferLowQuality`** (`boolean`)
@@ -154,17 +153,20 @@ Loads an image and encodes it to a compressed GPU texture.
   - **`mips`** or **`generateMipmaps`** (`boolean`)
     Whether to generate mipmaps. Default: `false`.
 
+  - **`mipmapCount`** (`number`)
+    Number of mip levels of the output texture. With `mips`, all of them are generated and encoded; without, only level 0 is encoded and the other levels are left for later encodes with `outputTexture` and `outputMipLevel` (see [Progressive Loading](#progressive-loading)). An explicit count is clamped to the full chain down to 1×1. Default: the chain down to 4×4 with `mips`, otherwise `1`.
+
   - **`mipmapFilter`** (`string`)
     The filter to use for mipmap generation:
     - `"box"` - Simple 2x2 box filter
     - `"magic"` - Higher quality 4x4 filter with sharpening properties.
-    Default: `"magic"`.
+      Default: `"magic"`.
 
   - **`mipsAlphaScale`** (`number[]`)
     Optional array of alpha scale values to apply to each generated mipmap level. The array should contain one value per mipmap level (starting with mip level 1, since level 0 is the base image). Each value multiplies the alpha channel of the corresponding mipmap level. Values greater than 1.0 increase opacity, while values less than 1.0 increase transparency. This is useful for techniques like alpha-tested mipmaps where you want to compensate for alpha loss at lower mip levels. If the array is shorter than the number of mipmap levels, the last value is used for remaining levels. Only applies when `mips` is `true`. Default: `undefined` (no scaling applied).
 
   - **`srgb`** (`boolean`)
-    Whether to encode the image using an as sRGB format. This also affects mipmap generation. The `srgb` mode can also be inferred from the `format`. Default: `false`. 
+    Whether to encode the image using an as sRGB format. This also affects mipmap generation. The `srgb` mode can also be inferred from the `format`. Default: `false`.
 
   - **`normal`** (`boolean`)
     Whether to interpret the image as a normal map. This affects automatic format selection favoring the use of `"bc5"` and `"eac-rg"` formats. Default: `false`.
@@ -172,8 +174,11 @@ Loads an image and encodes it to a compressed GPU texture.
   - **`flipY`** (`boolean`)
     Whether to vertically flip the image before encoding. Default: `false`.
 
-  - **`outputTexture`** (`GPUTexture` for Spark, result object for SparkGL)
-    A previously-returned texture to reuse as the output, avoiding reallocation when re-encoding into the same shape repeatedly. Reused only when its width, height, mipmap count, and format match the resolved output; otherwise a fresh texture is allocated and returned. Useful for real-time use cases such as encoding successive video frames. Default: `undefined`.
+  - **`outputTexture`** (`GPUTexture` for Spark, texture description for SparkGL)
+    An existing texture to write the result into instead of allocating a new one. For Spark pass a `GPUTexture` with `COPY_DST` usage; for SparkGL pass a previous result object, or any object with the same `texture`, `width`, `height`, `mipmapCount` and `format` properties. Without `outputMipLevel` the texture is a hint: it is reused only when its width, height, mipmap count, and format match the resolved output exactly, otherwise a fresh texture is allocated and returned. Useful for real-time use cases such as encoding successive video frames. Default: `undefined`.
+
+  - **`outputMipLevel`** (`number`)
+    Mip level of `outputTexture` that receives level 0 of the encode; generated mipmaps follow at the next levels and other levels are left untouched. When specified (even as `0`), `outputTexture` is required and validated: its level `outputMipLevel` must have the size of the encode, it must have room for all encoded levels, and its format must match, otherwise `encodeTexture` throws. See [Progressive Loading](#progressive-loading). Default: `undefined`.
 
 **Returns:**
 
@@ -186,8 +191,9 @@ Loads an image and encodes it to a compressed GPU texture.
   - `width` (`number`) - Texture width
   - `height` (`number`) - Texture height
   - `mipmapCount` (`number`) - Number of mipmap levels
-  - `byteLength` (`number`) - Size of the texture data in bytes
+  - `byteLength` (`number`) - Number of bytes written by this call
 
+  The result always describes the whole texture. When writing into a caller-supplied `outputTexture`, `texture`, `width`, `height` and `mipmapCount` are those of the supplied texture, and the result can be passed back as `outputTexture` to a later call.
 
 ### `getSupportedFormats()`
 
@@ -207,6 +213,7 @@ const formats = spark.getSupportedFormats()
 Checks if a specific format is supported.
 
 **Parameters:**
+
 - `format` (`string | number`) - Format name or format constant
 
 **Returns:** `boolean` - True if format is supported
@@ -258,7 +265,7 @@ spark.dispose()
 spark.js only offers a subset of the formats supported by Spark, but provides enough coverage for most use cases.
 
 | Format    | Channels | Bytes/Block | Compression Ratio | Quality |
-|-----------|----------|-------------|-------------------|---------|
+| --------- | -------- | ----------- | ----------------- | ------- |
 | bc1-rgb   | RGB      | 8           | 8:1               | Low     |
 | bc4-r     | R        | 8           | 2:1               | High    |
 | bc5-rg    | RG       | 8           | 2:1               | High    |
@@ -269,7 +276,6 @@ spark.js only offers a subset of the formats supported by Spark, but provides en
 | eac-rg    | RG       | 16          | 2:1               | High    |
 | astc-rgb  | RGB      | 16          | 4:1               | High    |
 | astc-rgba | RGBA     | 16          | 4:1               | High    |
-
 
 ### Format Selection Strategies
 
@@ -282,16 +288,16 @@ await spark.encodeTexture(image, { format: "bc7-rgba" })
 #### 2. Channel Mask (Recommended)
 
 ```js
-await spark.encodeTexture(image, { format: "rgba" })  // Auto-selects BC7/ASTC/ETC2
-await spark.encodeTexture(image, { format: "rgb" })   // Auto-selects BC7/ASTC/BC1/ETC2
-await spark.encodeTexture(image, { format: "rg" })    // Auto-selects BC5/EAC-RG
-await spark.encodeTexture(image, { format: "r" })     // Auto-selects BC4/EAC-R
+await spark.encodeTexture(image, { format: "rgba" }) // Auto-selects BC7/ASTC/ETC2
+await spark.encodeTexture(image, { format: "rgb" }) // Auto-selects BC7/ASTC/BC1/ETC2
+await spark.encodeTexture(image, { format: "rg" }) // Auto-selects BC5/EAC-RG
+await spark.encodeTexture(image, { format: "r" }) // Auto-selects BC4/EAC-R
 ```
 
 #### 3. Auto-Detection
 
 ```js
-await spark.encodeTexture(image, { format: "auto" })  // Analyzes image
+await spark.encodeTexture(image, { format: "auto" }) // Analyzes image
 ```
 
 ---
@@ -317,9 +323,7 @@ Each `encodeTexture()` call needs a few temporary GPU resources: a copy of the s
 ```js
 const spark = await Spark.create(device, { cacheTempResources: true })
 
-const textures = await Promise.all(
-  imageUrls.map(url => spark.encodeTexture(url, options))
-)
+const textures = await Promise.all(imageUrls.map(url => spark.encodeTexture(url, options)))
 // Free cached resources
 spark.freeTempResources()
 ```
@@ -341,6 +345,44 @@ const spark = await Spark.create(device, {
 
 Memory cost for `minSize = N` is roughly `(N/4)² × 16` bytes per block render target or output buffer, i.e. 16 MB for `N = 4096`. The source texture costs `width × height × 4` bytes (×4/3 with mipmaps) for the last encoded size.
 
+### Progressive Loading
+
+`outputTexture`, `outputMipLevel` and `mipmapCount` let several encodes fill one mip chain, so that a texture can be shown at low resolution first and refined in place, without swapping textures. For example, a viewer can encode a small preview into the lower levels of the final texture, sample only those levels while the full-resolution image loads, and then fill the top levels:
+
+```js
+// Allocate the final 4096² chain (spark generates mipmaps down to 4×4, i.e. 11 levels),
+// then encode the 256² preview into its level 4.
+const pyramid = device.createTexture({
+  size: [4096, 4096],
+  mipLevelCount: 11,
+  format: "bc7-rgba-unorm-srgb",
+  usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+})
+await spark.encodeTexture(preview, { format: "bc7", srgb: true, mips: true, outputTexture: pyramid, outputMipLevel: 4 })
+// ...render with the sampler's lodMinClamp at 4, then:
+await spark.encodeTexture(fullImage, { format: "bc7", srgb: true, mips: true, outputTexture: pyramid, outputMipLevel: 0 })
+```
+
+With SparkGL, allocate the texture with `texStorage2D` and describe it the same way `encodeTexture` returns it:
+
+```js
+const outputTexture = { texture, width: 4096, height: 4096, mipmapCount: 11, format: gl.COMPRESSED_SRGB_ALPHA_BPTC_UNORM_EXT }
+await spark.encodeTexture(preview, { format: "bc7", srgb: true, mips: true, outputTexture, outputMipLevel: 4 })
+```
+
+The encode at level `n` must have the size of that level (`max(1, width >> n)` × `max(1, height >> n)`), and the texture must have room for all the levels the encode writes below it. The second pass above re-encodes the lower levels from the full-resolution image, which gives a better chain than the preview; to write only the top levels instead, limit the chain with `mipmapCount: 4`. Spark never changes the sampler state of a texture it did not allocate, so `TEXTURE_BASE_LEVEL`, filters and wrap modes set by the caller are preserved.
+
+The same options let a caller provide its own mipmaps. The first encode allocates the whole chain but, without `mips`, writes only level 0; each following encode writes one level:
+
+```js
+const texture = await spark.encodeTexture(levels[0], { format: "bc7", mipmapCount: levels.length })
+for (let level = 1; level < levels.length; level++) {
+  await spark.encodeTexture(levels[level], { format: "bc7", outputTexture: texture, outputMipLevel: level })
+}
+```
+
+Until they are written, the unencoded levels of a freshly allocated texture read as zero. (With SparkGL, pass the first result object as `outputTexture`.)
+
 ### Verbose Logging
 
 Enable detailed logging for debugging:
@@ -355,9 +397,9 @@ const spark = await Spark.create(device, { verbose: true })
 Use timestamp queries to measure GPU performance:
 
 ```js
-const spark = await Spark.create(device, { 
+const spark = await Spark.create(device, {
   useTimestampQueries: true,
-  verbose: true 
+  verbose: true
 })
 // GPU timings logged to console
 ```

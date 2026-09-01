@@ -291,3 +291,189 @@ test("SparkGL: cacheTempResources does not change the encoded result", async () 
   }
   assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
 })
+
+// Decode all `count` levels of a texture starting at `level`, given the size of that level.
+function readLevels(gl, texture, level, width, height, count) {
+  const levels = []
+  for (let i = 0; i < count; i++) {
+    levels.push(readMipLevel(gl, texture, level + i, Math.max(1, width >> i), Math.max(1, height >> i)))
+  }
+  return levels
+}
+
+test("SparkGL: outputMipLevel fills one mip chain across several encodes", async () => {
+  const tracker = createGL()
+  const gl = tracker.gl
+  const spark = SparkGL.create(gl)
+  const options = { format: "rgb" }
+  const base = await makeNoiseImage(256, 128, 1)
+  const preview = await makeNoiseImage(64, 32, 2)
+  const full = await makeNoiseImage(256, 128, 3)
+
+  // References: each image encoded on its own.
+  const baseRef = await spark.encodeTexture(base, { ...options, mips: true })
+  const previewRef = await spark.encodeTexture(preview, { ...options, mips: true })
+  const fullRef = await spark.encodeTexture(full, options)
+  assert.equal(baseRef.mipmapCount, 2 + previewRef.mipmapCount)
+
+  // The chain to fill, initially holding `base` at every level.
+  const chain = await spark.encodeTexture(base, { ...options, mips: true })
+
+  // Pass 1: the preview and its mipmaps go to levels 2 and below.
+  const pass1 = await spark.encodeTexture(preview, { ...options, mips: true, outputTexture: chain, outputMipLevel: 2 })
+  assert.equal(pass1.texture, chain.texture, "pass 1 did not write into the output texture")
+  assert.equal(pass1.width, chain.width, "result should describe the output texture")
+  assert.equal(pass1.mipmapCount, chain.mipmapCount, "result should describe the output texture")
+  assert.equal(pass1.byteLength, previewRef.byteLength, "byteLength should be the bytes written")
+
+  // Pass 2: the full image, without mipmaps, goes to level 0 only.
+  const pass2 = await spark.encodeTexture(full, { ...options, outputTexture: chain, outputMipLevel: 0 })
+  assert.equal(pass2.texture, chain.texture, "pass 2 did not write into the output texture")
+  assert.equal(pass2.byteLength, fullRef.byteLength, "byteLength should be the bytes written")
+
+  // Level 0 comes from pass 2, level 1 is untouched, levels 2.. come from pass 1.
+  const actual = readLevels(gl, chain.texture, 0, 256, 128, chain.mipmapCount)
+  const expected = [
+    readLevels(gl, fullRef.texture, 0, 256, 128, 1)[0],
+    readLevels(gl, baseRef.texture, 1, 128, 64, 1)[0],
+    ...readLevels(gl, previewRef.texture, 0, 64, 32, previewRef.mipmapCount)
+  ]
+  for (let level = 0; level < expected.length; level++) {
+    const diff = firstDifference(actual[level], expected[level])
+    assert.ok(!diff, `level ${level}: ${diff}`)
+  }
+
+  for (const result of [baseRef, previewRef, fullRef, chain]) gl.deleteTexture(result.texture)
+  await spark.dispose()
+  assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
+})
+
+test("SparkGL: outputMipLevel validates the output texture", async () => {
+  const tracker = createGL()
+  const gl = tracker.gl
+  const spark = SparkGL.create(gl)
+  const options = { format: "rgb" }
+  const image = await makeNoiseImage(64, 32, 1)
+  const single = await spark.encodeTexture(image, options) // 64x32, one level
+
+  // Level 1 of `single` is 32x16, not 64x32.
+  await assert.rejects(spark.encodeTexture(image, { ...options, outputTexture: single, outputMipLevel: 1 }), /does not fit/)
+  // No room for the mip chain below level 0.
+  await assert.rejects(spark.encodeTexture(image, { ...options, mips: true, outputTexture: single, outputMipLevel: 0 }), /does not fit/)
+  await assert.rejects(spark.encodeTexture(image, { ...options, outputMipLevel: 0 }), /requires an outputTexture/)
+  await assert.rejects(spark.encodeTexture(image, { ...options, outputTexture: single, outputMipLevel: -1 }), /non-negative integer/)
+
+  // Without outputMipLevel a mismatch is not an error: a fresh texture is returned.
+  const fresh = await spark.encodeTexture(image, { ...options, mips: true, outputTexture: single })
+  assert.ok(fresh.texture !== single.texture, "a mismatched hint should allocate a fresh texture")
+  // And an exact match is reused.
+  const reused = await spark.encodeTexture(image, { ...options, outputTexture: single })
+  assert.equal(reused.texture, single.texture, "a matching hint should be reused")
+
+  gl.deleteTexture(single.texture)
+  gl.deleteTexture(fresh.texture)
+  await spark.dispose()
+  assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
+})
+
+test("SparkGL: sampler state of a reused output texture is preserved", async () => {
+  const tracker = createGL()
+  const gl = tracker.gl
+  const spark = SparkGL.create(gl)
+  const image = await makeNoiseImage(64, 32, 1)
+  const result = await spark.encodeTexture(image, { format: "rgb", mips: true })
+
+  gl.bindTexture(gl.TEXTURE_2D, result.texture)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, 2)
+  gl.bindTexture(gl.TEXTURE_2D, null)
+
+  await spark.encodeTexture(image, { format: "rgb", mips: true, outputTexture: result })
+  await spark.encodeTexture(await makeNoiseImage(32, 16, 2), { format: "rgb", outputTexture: result, outputMipLevel: 1 })
+
+  gl.bindTexture(gl.TEXTURE_2D, result.texture)
+  assert.equal(gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER), gl.NEAREST, "TEXTURE_MIN_FILTER was changed")
+  assert.equal(gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S), gl.CLAMP_TO_EDGE, "TEXTURE_WRAP_S was changed")
+  assert.equal(gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL), 2, "TEXTURE_BASE_LEVEL was changed")
+  gl.bindTexture(gl.TEXTURE_2D, null)
+
+  gl.deleteTexture(result.texture)
+  await spark.dispose()
+  assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
+})
+
+test("SparkGL: mipmapCount limits the generated chain", async () => {
+  const tracker = createGL()
+  const gl = tracker.gl
+  const spark = SparkGL.create(gl)
+  const image = await makeNoiseImage(64, 32, 1)
+  const options = { format: "rgb", mips: true }
+
+  const full = await spark.encodeTexture(image, options)
+  assert.equal(full.mipmapCount, 5, "default chain should stop at 4x4")
+  const partial = await spark.encodeTexture(image, { ...options, mipmapCount: 3 })
+  assert.equal(partial.mipmapCount, 3)
+  const tiny = await spark.encodeTexture(image, { ...options, mipmapCount: 99 })
+  assert.equal(tiny.mipmapCount, 7, "explicit count should be clamped to the chain down to 1x1")
+
+  const expected = readLevels(gl, full.texture, 0, 64, 32, 3)
+  const actual = readLevels(gl, partial.texture, 0, 64, 32, 3)
+  for (let level = 0; level < 3; level++) {
+    const diff = firstDifference(actual[level], expected[level])
+    assert.ok(!diff, `level ${level}: ${diff}`)
+  }
+  // The levels shared with the default chain match, and the 1x1 level is the mean colour.
+  const tinyLevels = readLevels(gl, tiny.texture, 0, 64, 32, 7)
+  const fullLevels = readLevels(gl, full.texture, 0, 64, 32, 5)
+  for (let level = 0; level < 5; level++) {
+    const diff = firstDifference(tinyLevels[level], fullLevels[level])
+    assert.ok(!diff, `level ${level}: ${diff}`)
+  }
+  assert.equal(tinyLevels[6].length, 4)
+
+  await assert.rejects(spark.encodeTexture(image, { ...options, mipmapCount: 0 }), /positive integer/)
+  await assert.rejects(spark.encodeTexture(image, { ...options, mipmapCount: 1.5 }), /positive integer/)
+
+  for (const result of [full, partial, tiny]) gl.deleteTexture(result.texture)
+  await spark.dispose()
+  assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
+})
+
+test("SparkGL: a caller-supplied mip chain is encoded one level per call", async () => {
+  const tracker = createGL()
+  const gl = tracker.gl
+  const spark = SparkGL.create(gl)
+  const options = { format: "rgb" }
+  const levelCount = 4
+  const images = []
+  for (let level = 0; level < levelCount; level++) {
+    images.push(await makeNoiseImage(64 >> level, 32 >> level, level + 1))
+  }
+
+  // First call allocates the chain and encodes level 0 only; the rest come one level per call.
+  const chain = await spark.encodeTexture(images[0], { ...options, mipmapCount: levelCount })
+  assert.equal(chain.mipmapCount, levelCount)
+  const level0 = await spark.encodeTexture(images[0], options)
+  assert.equal(chain.byteLength, level0.byteLength, "only level 0 should have been written")
+  gl.deleteTexture(level0.texture)
+  for (let level = 1; level < levelCount; level++) {
+    const result = await spark.encodeTexture(images[level], { ...options, outputTexture: chain, outputMipLevel: level })
+    assert.equal(result.texture, chain.texture)
+  }
+
+  // Every level matches the image encoded on its own.
+  for (let level = 0; level < levelCount; level++) {
+    const single = await spark.encodeTexture(images[level], options)
+    const diff = firstDifference(
+      readMipLevel(gl, chain.texture, level, 64 >> level, 32 >> level),
+      readMipLevel(gl, single.texture, 0, 64 >> level, 32 >> level)
+    )
+    assert.ok(!diff, `level ${level}: ${diff}`)
+    gl.deleteTexture(single.texture)
+  }
+
+  gl.deleteTexture(chain.texture)
+  await spark.dispose()
+  assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
+})

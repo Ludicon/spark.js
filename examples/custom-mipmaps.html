@@ -1,0 +1,387 @@
+<!doctype html>
+<html>
+  <!-- prettier-ignore -->
+  <head>
+    <title>spark.js - Custom mipmaps example (WebGPU)</title>
+    <style>
+      body { margin: 0; background: black; font-family: sans-serif; }
+      canvas { display: block; }
+      #info {
+        position: absolute; top: 20px; left: 20px;
+        background: rgba(0, 0, 0, 0.7); color: white;
+        padding: 15px 20px; border-radius: 8px; font-size: 14px; max-width: 420px;
+      }
+      #status { margin-top: 10px; font-size: 12px; color: #aaa; }
+    </style>
+  </head>
+
+  <body>
+    <!-- prettier-ignore -->
+    <div id="info">
+      Each mip level is drawn on its own canvas and encoded into the same texture with
+      <code>outputTexture</code> and <code>outputMipLevel</code>.
+      <div id="status"></div>
+    </div>
+    <script type="module">
+      import { Spark } from "@ludicon/spark.js"
+
+      const errorMessage = `
+          <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
+            <h1>WebGPU Not Supported</h1>
+            <p>This demo requires a browser with WebGPU support.</p>
+            <p>Please try using <strong>Chrome</strong> or <strong>Edge</strong> with WebGPU enabled, or a recent version of <strong>Safari</strong> on macOS.</p>
+            <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API" target="_blank">MDN: WebGPU API</a></p>
+          </div>
+        `
+
+      async function initWebGPU() {
+        if (!navigator.gpu) {
+          document.body.innerHTML = errorMessage
+          throw new Error("WebGPU not supported")
+        }
+
+        let adapter = null
+        try {
+          adapter = await navigator.gpu.requestAdapter()
+        } catch (err) {
+          console.error("Error while requesting WebGPU adapter:", err)
+        }
+        if (!adapter) {
+          document.body.innerHTML = errorMessage
+          throw new Error("No appropriate GPUAdapter found")
+        }
+
+        // Request WebGPU features that Spark needs.
+        const requiredFeatures = Spark.getRequiredFeatures(adapter)
+        const device = await adapter.requestDevice({ requiredFeatures })
+
+        const canvas = document.createElement("canvas")
+        document.body.appendChild(canvas)
+
+        const context = canvas.getContext("webgpu")
+        const canvasFormat = navigator.gpu.getPreferredCanvasFormat()
+
+        context.configure({
+          device,
+          format: canvasFormat,
+          alphaMode: "opaque"
+        })
+
+        return { device, context, canvasFormat }
+      }
+
+      // Draw one mip level: a solid colour with the level number in the middle, when it fits.
+      function createMipLevelCanvas(level, size) {
+        const canvas = document.createElement("canvas")
+        canvas.width = size
+        canvas.height = size
+        const ctx = canvas.getContext("2d")
+
+        ctx.fillStyle = `hsl(${(level * 47) % 360}, 70%, 50%)`
+        ctx.fillRect(0, 0, size, size)
+
+        if (size >= 32) {
+          ctx.fillStyle = "white"
+          ctx.font = `bold ${Math.round(size * 0.6)}px sans-serif`
+          ctx.textAlign = "center"
+          ctx.textBaseline = "middle"
+          ctx.fillText(String(level), size / 2, size / 2)
+        }
+
+        return canvas
+      }
+
+      // Lay the levels out in a 1.5:1 space, in texture widths: level 0 fills the square on the
+      // left, and levels 1 and below are stacked down the column to its right at their true size
+      // (they add up to just under one texture height). Each level gets [u, v, size].
+      function computeLayout(mipmapCount) {
+        const rects = [[0, 0, 1]]
+        let v = 0
+        for (let level = 1; level < mipmapCount; level++) {
+          const size = 1 / (1 << level)
+          rects.push([1, v, size])
+          v += size
+        }
+        return rects
+      }
+
+      // Uniforms shared by both shaders: canvas and texture size, then the layout of the levels.
+      const uniformsStruct = `
+        struct Uniforms {
+            canvasWidth: f32,
+            canvasHeight: f32,
+            textureWidth: f32,
+            textureHeight: f32,
+            levelCount: u32,
+            rects: array<vec4f, 16>, // [u, v, size] of each level in the 1.5:1 layout
+        }
+        @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+      `
+      const uniformsSize = 16 + 16 + 16 * 16
+
+      // Vertex shader
+      const vertexShader =
+        uniformsStruct +
+        `
+
+        struct VertexOutput {
+          @builtin(position) position: vec4f,
+          @location(0) texCoord: vec2f,
+        }
+
+        @vertex
+        fn main(@location(0) position: vec2f, @location(1) texCoord: vec2f) -> VertexOutput
+        {
+          var output: VertexOutput;
+
+          // Scale the position to maintain the 1.5:1 aspect ratio of the layout
+          let aspect = (uniforms.textureHeight * uniforms.canvasWidth) / (uniforms.canvasHeight * uniforms.textureWidth) / 1.5;
+
+          let scale = vec2f(
+            min(1.0, 1.0 / aspect),
+            max(-1.0, -aspect));
+          let scaledPos = position * scale;
+
+          output.position = vec4f(scaledPos, 0.0, 1.0);
+          output.texCoord = texCoord;
+          return output;
+        }
+        `
+
+      // Fragment shader
+      const fragmentShader =
+        uniformsStruct +
+        `
+        @group(0) @binding(1) var t_diffuse: texture_2d<f32>;
+        @group(0) @binding(2) var s_diffuse: sampler;
+
+        fn linear_to_srgb_vec3(c: vec3<f32>) -> vec3<f32> {
+            return select(
+                1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - 0.055,
+                c * 12.92,
+                c <= vec3<f32>(0.0031308)
+            );
+        }
+
+        @fragment
+        fn main(@location(0) texCoord: vec2f) -> @location(0) vec4f {
+
+          // Find the level whose rectangle contains this pixel and sample it.
+          var color = vec3f(0.0);
+          let uv = vec2f(1.5 * texCoord.x, texCoord.y);
+
+          for (var i = 0u; i < uniforms.levelCount; i++) {
+            let p = (uv - uniforms.rects[i].xy) / uniforms.rects[i].z;
+            if (all(p >= vec2f(0.0)) && all(p < vec2f(1.0))) {
+              color = textureSampleLevel(t_diffuse, s_diffuse, p, f32(i)).xyz;
+              break;
+            }
+          }
+
+          color = linear_to_srgb_vec3(color);
+
+          return vec4f(color, 1.0);
+        }
+        `
+
+      // Create vertex buffer
+      function createVertexBuffer(device) {
+        // prettier-ignore
+        const vertices = new Float32Array([
+          // position (x, y), texCoord (u, v)
+          -1.0, -1.0, 0.0, 0.0, // bottom left
+           1.0, -1.0, 1.0, 0.0, // bottom right
+          -1.0,  1.0, 0.0, 1.0, // top left
+           1.0,  1.0, 1.0, 1.0  // top right
+        ])
+
+        const vertexBuffer = device.createBuffer({
+          size: vertices.byteLength,
+          usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+        })
+        device.queue.writeBuffer(vertexBuffer, 0, vertices)
+        return vertexBuffer
+      }
+
+      // Main initialization
+      async function init() {
+        const { device, context, canvasFormat } = await initWebGPU()
+
+        // Create Spark instance.
+        const spark = await Spark.create(device, { preload: ["rgb"], verbose: true })
+
+        // Draw every mip level of a 512x512 texture, down to 1x1.
+        const baseSize = 512
+        const mipmapCount = Math.log2(baseSize) + 1
+        const levels = []
+        for (let level = 0; level < mipmapCount; level++) {
+          levels.push(createMipLevelCanvas(level, baseSize >> level))
+        }
+
+        // The first encode allocates the whole mip chain but only writes level 0, since no
+        // mipmaps are generated. Each following encode writes one of the remaining levels.
+        const options = { format: "rgb", srgb: true }
+        const texture = await spark.encodeTexture(levels[0], { ...options, mipmapCount })
+        for (let level = 1; level < mipmapCount; level++) {
+          await spark.encodeTexture(levels[level], { ...options, outputTexture: texture, outputMipLevel: level })
+        }
+
+        document.getElementById("status").textContent =
+          `Encoded ${texture.mipLevelCount} mip levels (${baseSize}x${baseSize} to 1x1) as ${texture.format}`
+
+        // Create vertex buffer
+        const vertexBuffer = createVertexBuffer(device)
+
+        // Create uniform buffer for canvas dimensions and the layout of the levels
+        const uniformBuffer = device.createBuffer({
+          size: uniformsSize,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        })
+
+        const uniformData = new ArrayBuffer(uniformsSize)
+        const uniformFloats = new Float32Array(uniformData)
+        new Uint32Array(uniformData)[4] = texture.mipLevelCount
+        computeLayout(texture.mipLevelCount).forEach(([u, v, size], i) => uniformFloats.set([u, v, size, 0], 8 + i * 4))
+
+        // Create sampler
+        const sampler = device.createSampler({
+          magFilter: "linear",
+          minFilter: "linear"
+        })
+
+        // Create bind group layout
+        const bindGroupLayout = device.createBindGroupLayout({
+          entries: [
+            {
+              binding: 0,
+              visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+              buffer: { type: "uniform" }
+            },
+            {
+              binding: 1,
+              visibility: GPUShaderStage.FRAGMENT,
+              texture: { sampleType: "float" }
+            },
+            {
+              binding: 2,
+              visibility: GPUShaderStage.FRAGMENT,
+              sampler: { type: "filtering" }
+            }
+          ]
+        })
+
+        const bindGroup = device.createBindGroup({
+          layout: bindGroupLayout,
+          entries: [
+            {
+              binding: 0,
+              resource: { buffer: uniformBuffer }
+            },
+            {
+              binding: 1,
+              resource: texture.createView()
+            },
+            {
+              binding: 2,
+              resource: sampler
+            }
+          ]
+        })
+
+        // Create pipeline layout
+        const pipelineLayout = device.createPipelineLayout({
+          bindGroupLayouts: [bindGroupLayout]
+        })
+
+        // Create render pipeline
+        const pipeline = device.createRenderPipeline({
+          layout: pipelineLayout,
+          vertex: {
+            module: device.createShaderModule({ code: vertexShader }),
+            entryPoint: "main",
+            buffers: [
+              {
+                arrayStride: 16,
+                attributes: [
+                  {
+                    // position
+                    shaderLocation: 0,
+                    offset: 0,
+                    format: "float32x2"
+                  },
+                  {
+                    // texCoord
+                    shaderLocation: 1,
+                    offset: 8,
+                    format: "float32x2"
+                  }
+                ]
+              }
+            ]
+          },
+          fragment: {
+            module: device.createShaderModule({ code: fragmentShader }),
+            entryPoint: "main",
+            targets: [
+              {
+                format: canvasFormat
+              }
+            ]
+          },
+          primitive: {
+            topology: "triangle-strip",
+            stripIndexFormat: "uint32"
+          }
+        })
+
+        // Handle window resize
+        function resizeCanvas() {
+          const displayWidth = window.innerWidth
+          const displayHeight = window.innerHeight
+
+          const canvas = document.querySelector("canvas")
+          if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+            canvas.width = displayWidth
+            canvas.height = displayHeight
+
+            // Update uniform buffer with new dimensions
+            uniformFloats.set([displayWidth, displayHeight, texture.width, texture.height], 0)
+            device.queue.writeBuffer(uniformBuffer, 0, uniformData)
+          }
+        }
+        window.addEventListener("resize", resizeCanvas)
+        resizeCanvas()
+
+        // Render function
+        function render() {
+          const commandEncoder = device.createCommandEncoder()
+          const renderPass = commandEncoder.beginRenderPass({
+            colorAttachments: [
+              {
+                view: context.getCurrentTexture().createView(),
+                clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+                loadOp: "clear",
+                storeOp: "store"
+              }
+            ]
+          })
+
+          renderPass.setPipeline(pipeline)
+          renderPass.setBindGroup(0, bindGroup)
+          renderPass.setVertexBuffer(0, vertexBuffer)
+          renderPass.draw(4, 1, 0, 0)
+          renderPass.end()
+
+          device.queue.submit([commandEncoder.finish()])
+          requestAnimationFrame(render)
+        }
+
+        render()
+      }
+
+      init().catch(error => {
+        console.error("Error initializing WebGPU:", error)
+      })
+    </script>
+  </body>
+</html>

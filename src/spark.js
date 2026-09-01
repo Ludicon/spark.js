@@ -1,5 +1,15 @@
 import shaders from "./shaders/wgsl-shaders.js"
-import { assert, loadImage, loadImageFromBlob, getSafariVersion, getFirefoxVersion, parseCacheTempResources } from "./utils.js"
+import {
+  assert,
+  loadImage,
+  loadImageFromBlob,
+  getSafariVersion,
+  getFirefoxVersion,
+  parseCacheTempResources,
+  resolveOutputTexture,
+  resolveMipmapCount,
+  fullMipmapCount
+} from "./utils.js"
 
 const SparkFormat = {
   ASTC_4x4_RGB: 0,
@@ -233,9 +243,8 @@ const UNIFORM_SLOT_SIZE = 8
 const UNIFORM_SLOT_COUNT = 16 // Enough for a 16384x16384 texture with a full mip chain.
 
 // Let's not waste time generating mips below this size:
-const MIN_MIP_SIZE = 4
-
-function computeMipmapLayout(w, h, blockSize, mipmaps) {
+// Lay out `levelCount` mip levels of a w x h texture in the output buffer.
+function computeMipmapLayout(w, h, blockSize, levelCount) {
   let mipmapCount = 0
   let offset = 0
   const bufferRanges = []
@@ -254,7 +263,7 @@ function computeMipmapLayout(w, h, blockSize, mipmaps) {
 
     w = Math.max(1, Math.floor(w / 2))
     h = Math.max(1, Math.floor(h / 2))
-  } while (mipmaps && (w >= MIN_MIP_SIZE || h >= MIN_MIP_SIZE))
+  } while (mipmapCount < levelCount)
 
   return { mipmapCount, outputSize: offset, bufferRanges }
 }
@@ -519,6 +528,12 @@ class Spark {
    * @param {boolean} [options.mips=false] | [options.generateMipmaps=false]
    *        Whether to generate mipmaps.
    *
+   * @param {number} [options.mipmapCount]
+   *        Number of mip levels of the output texture. Defaults to the full chain down to 4x4
+   *        with mips, or 1 without. An explicit count is clamped to the chain down to 1x1.
+   *        Without mips only level 0 is encoded, leaving the other levels for later encodes
+   *        with outputTexture / outputMipLevel.
+   *
    * @param {string} [options.mipmapFilter="magic"]
    *        The filter to use for mipmap generation. Can be "box" for a simple box filter,
    *        or "magic" for a higher-quality 4-tap filter with sharpening properties.
@@ -596,13 +611,19 @@ class Spark {
     // call could overwrite or reallocate the cached textures and buffers underneath us.
     const pipeline = await this.#loadPipeline(format)
 
-    // Round up the size to meet WebGPU's 4-texel alignment requirement, unless the texture-compression-unaligned feature lifts it.
-    const width = this.#supportsUnalignedTextures ? srcWidth : Math.ceil(srcWidth / 4) * 4
-    const height = this.#supportsUnalignedTextures ? srcHeight : Math.ceil(srcHeight / 4) * 4
+    // Round up the size to meet WebGPU's 4-texel alignment requirement, unless the texture-compression-unaligned
+    // feature lifts it. Only the top mip level of a compressed texture is subject to it.
+    const alignment = this.#supportsUnalignedTextures || (options.outputMipLevel ?? 0) > 0 ? 1 : 4
+    const width = Math.ceil(srcWidth / alignment) * alignment
+    const height = Math.ceil(srcHeight / alignment) * alignment
     const blockSize = SparkBlockSize[format]
-    const mipmaps = options.generateMipmaps || options.mips
 
-    const { mipmapCount, outputSize, bufferRanges } = computeMipmapLayout(width, height, blockSize, mipmaps)
+    // Determine mipmap counts: mipmapCount is the number of levels of the output texture,
+    // encodedMipmapCount the number of levels this call writes (see resolveMipmapCount).
+    const { mipmapCount, encodedMipmapCount } = resolveMipmapCount(options, width, height)
+    const generateMipmaps = encodedMipmapCount > 1
+
+    const { outputSize, bufferRanges } = computeMipmapLayout(width, height, blockSize, encodedMipmapCount)
 
     // @@ Add a warning when the user requests srgb, but the selected format does not support it.
     const srgb = (options.srgb || options.format?.endsWith("srgb")) && isFormatRGB(format)
@@ -616,6 +637,21 @@ class Spark {
     if (options.normal) colorMode = ColorMode.Normal
 
     const webgpuFormat = SparkWebGPUFormats[format] + (srgb ? "-srgb" : "")
+
+    // Resolve the output texture before creating any resource, so that a rejected
+    // outputTexture has no side effects. A texture we cannot copy into never matches.
+    const { reuse: reuseOutput, outputMipLevel } = resolveOutputTexture(
+      options,
+      options.outputTexture
+        ? {
+            width: options.outputTexture.width,
+            height: options.outputTexture.height,
+            mipLevelCount: options.outputTexture.mipLevelCount,
+            format: options.outputTexture.usage & GPUTextureUsage.COPY_DST ? options.outputTexture.format : "not copyable"
+          }
+        : null,
+      { width, height, mipmapCount, encodedMipmapCount, format: webgpuFormat }
+    )
 
     // For now let's just create a texture. Ideally we would use a staging buffer, but in WebGPU it's not possible to create a bufer that
     // both the host can write to and the device can read from a compute shader, so in practice we would need two buffers and to perform
@@ -663,7 +699,7 @@ class Spark {
     // Allocate input texture.
     let inputTexture
 
-    if (needsProcessing || !(image instanceof GPUTexture && !mipmaps)) {
+    if (needsProcessing || !(image instanceof GPUTexture && !generateMipmaps)) {
       // Create or reuse input texture. A cached texture is only reused when it has exactly the
       // same size as the image: the mipmap and encoder shaders size themselves from the texture
       // (edge blocks and mip filters fetch past the image extent), so a larger texture would
@@ -674,7 +710,7 @@ class Spark {
         this.#cachedInputTexture.width !== width ||
         this.#cachedInputTexture.height !== height ||
         this.#cachedInputTexture.format != inputFormat ||
-        this.#cachedInputTexture.mipLevelCount < mipmapCount
+        this.#cachedInputTexture.mipLevelCount < encodedMipmapCount
 
       if (this.#cacheTempResources && this.#cachedInputTexture && !needsRealloc) {
         inputTexture = this.#cachedInputTexture
@@ -683,8 +719,7 @@ class Spark {
           this.#cachedInputTexture.destroy()
         }
         // When caching, honor the mipmap allocation hint (minSize does not apply, see above).
-        const allocMipmaps = mipmaps || this.#cacheAllocateMipmaps
-        const allocMipLevelCount = allocMipmaps ? computeMipmapLayout(width, height, blockSize, true).mipmapCount : 1
+        const allocMipLevelCount = Math.max(encodedMipmapCount, this.#cacheAllocateMipmaps ? fullMipmapCount(width, height) : 1)
         inputTexture = this.#device.createTexture({
           size: [width, height, 1],
           mipLevelCount: allocMipLevelCount,
@@ -738,7 +773,7 @@ class Spark {
       }
     } else {
       if (image instanceof GPUTexture) {
-        if (mipmaps) {
+        if (generateMipmaps) {
           // This copy is only necessary because input texture is expected to have mipmaps. It would be faster to
           // have a special case for mip 0 and use a separate texture for the remaining mips.
 
@@ -753,23 +788,16 @@ class Spark {
       }
     }
 
-    if (mipmaps) {
-      this.#generateMipmaps(commandEncoder, inputTexture, mipmapCount, width, height, colorMode, options.mipsAlphaScale, options.mipmapFilter)
+    if (generateMipmaps) {
+      this.#generateMipmaps(commandEncoder, inputTexture, encodedMipmapCount, width, height, colorMode, options.mipsAlphaScale, options.mipmapFilter)
     }
 
     commandEncoder.popDebugGroup?.()
 
     this.#timeEnd("create input texture #" + counter)
 
-    // Allocate output texture.
-    const reuseTexture =
-      options.outputTexture &&
-      options.outputTexture.width == width &&
-      options.outputTexture.height == height &&
-      options.outputTexture.mipLevelCount == mipmapCount &&
-      options.outputTexture.format == webgpuFormat
-
-    const outputTexture = reuseTexture
+    // Allocate output texture (see resolveOutputTexture above).
+    const outputTexture = reuseOutput
       ? options.outputTexture
       : this.#device.createTexture({
           size: [width, height, 1],
@@ -789,8 +817,9 @@ class Spark {
       // With a minimum cache size, allocate enough for that size (with a mip chain if hinted).
       let allocSize = outputSize
       if (this.#cacheMinSize > 0) {
-        const allocMipmaps = mipmaps || this.#cacheAllocateMipmaps
-        const minLayout = computeMipmapLayout(this.#cacheMinSize, this.#cacheMinSize, blockSize, allocMipmaps)
+        const allocMipmaps = generateMipmaps || this.#cacheAllocateMipmaps
+        const minSize = this.#cacheMinSize
+        const minLayout = computeMipmapLayout(minSize, minSize, blockSize, allocMipmaps ? fullMipmapCount(minSize, minSize) : 1)
         allocSize = Math.max(outputSize, minLayout.outputSize)
       }
       outputBuffer = this.#device.createBuffer({
@@ -822,7 +851,7 @@ class Spark {
     const pass = commandEncoder.beginComputePass(args)
     pass.setPipeline(pipeline)
 
-    for (let m = 0; m < mipmapCount; m++) {
+    for (let m = 0; m < encodedMipmapCount; m++) {
       const bindGroup = this.#device.createBindGroup({
         layout: pipeline.getBindGroupLayout(0),
         entries: [
@@ -856,7 +885,7 @@ class Spark {
 
     pass.end()
 
-    for (let m = 0; m < mipmapCount; m++) {
+    for (let m = 0; m < encodedMipmapCount; m++) {
       // Copy from output buffer to output texture
       commandEncoder.copyBufferToTexture(
         {
@@ -867,7 +896,7 @@ class Spark {
         },
         {
           texture: outputTexture,
-          mipLevel: m
+          mipLevel: outputMipLevel + m
         },
         {
           width: bufferRanges[m].bw * 4,

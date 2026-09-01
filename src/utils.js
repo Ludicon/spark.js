@@ -18,6 +18,89 @@ export function parseCacheTempResources(option) {
   return { enabled: Boolean(option), minSize: 0, allocateMipmaps: false }
 }
 
+// Generated mip chains stop at 4x4 by default, the size of a compressed block.
+const MIN_MIP_SIZE = 4
+
+/** Number of mip levels from width x height down to minSize x minSize (or the nearest level above it). */
+export function fullMipmapCount(width, height, minSize = MIN_MIP_SIZE) {
+  let count = 1
+  let w = width
+  let h = height
+  while (w > minSize || h > minSize) {
+    count++
+    w = Math.max(1, Math.floor(w / 2))
+    h = Math.max(1, Math.floor(h / 2))
+  }
+  return count
+}
+
+/**
+ * Resolve the mip levels of an encode from options.mipmapCount and options.mips/generateMipmaps.
+ *
+ * `mipmapCount` is the number of levels of the output texture: an explicit count is clamped to
+ * the full chain down to 1x1; the default is the chain down to 4x4 with `mips`, else 1.
+ * `encodedMipmapCount` is the number of levels this encode writes: all of them with `mips`,
+ * otherwise only level 0, leaving the rest for later encodes (see options.outputMipLevel).
+ *
+ * Returns { mipmapCount, encodedMipmapCount }.
+ */
+export function resolveMipmapCount(options, width, height) {
+  const generateMipmaps = Boolean(options.generateMipmaps || options.mips)
+  let mipmapCount
+  if (options.mipmapCount !== undefined) {
+    if (!Number.isInteger(options.mipmapCount) || options.mipmapCount < 1) {
+      throw new Error(`mipmapCount must be a positive integer, got ${options.mipmapCount}`)
+    }
+    mipmapCount = Math.min(options.mipmapCount, fullMipmapCount(width, height, 1))
+  } else {
+    mipmapCount = generateMipmaps ? fullMipmapCount(width, height) : 1
+  }
+  return { mipmapCount, encodedMipmapCount: generateMipmaps ? mipmapCount : 1 }
+}
+
+/**
+ * Decide whether the caller's output texture receives the encoded result.
+ *
+ * `existing` describes options.outputTexture as { width, height, mipLevelCount, format } (null
+ * when none was given); `expected` is the resolved encode as { width, height, mipmapCount,
+ * encodedMipmapCount, format }.
+ *
+ * Without `outputMipLevel`, the texture is a hint: it is reused only when it matches the texture
+ * the encode would allocate exactly, otherwise the caller gets a fresh texture. With
+ * `outputMipLevel` (even 0), the texture is a requirement: level 0 of the encode lands at that mip
+ * level, the texture must be the encode scaled up by that many levels and have room for all the
+ * encoded levels, and a mismatch throws.
+ *
+ * Returns { reuse, outputMipLevel }.
+ */
+export function resolveOutputTexture(options, existing, expected) {
+  const outputMipLevel = options.outputMipLevel ?? 0
+  const strict = options.outputMipLevel !== undefined
+  if (!Number.isInteger(outputMipLevel) || outputMipLevel < 0) {
+    throw new Error(`outputMipLevel must be a non-negative integer, got ${outputMipLevel}`)
+  }
+  if (strict && !existing) {
+    throw new Error("outputMipLevel requires an outputTexture")
+  }
+
+  const reuse =
+    Boolean(existing) &&
+    existing.format === expected.format &&
+    Math.max(1, existing.width >> outputMipLevel) === expected.width &&
+    Math.max(1, existing.height >> outputMipLevel) === expected.height &&
+    (strict ? existing.mipLevelCount >= outputMipLevel + expected.encodedMipmapCount : existing.mipLevelCount === expected.mipmapCount)
+
+  if (strict && !reuse) {
+    throw new Error(
+      `outputTexture does not fit the encode: mip level ${outputMipLevel} must be ` +
+        `${expected.width}x${expected.height} in format ${expected.format} with at least ` +
+        `${expected.encodedMipmapCount} levels below it, got a ${existing.width}x${existing.height} ` +
+        `${existing.format} texture with ${existing.mipLevelCount} levels`
+    )
+  }
+  return { reuse, outputMipLevel }
+}
+
 export function assert(condition, message) {
   if (!condition) {
     throw new Error(message)

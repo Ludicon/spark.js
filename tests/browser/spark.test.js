@@ -313,3 +313,169 @@ for (const mipmapFilter of ["box", "magic"]) {
     device.destroy()
   })
 }
+
+// Decode all `count` levels of a texture starting at `level`, given the size of that level.
+async function readLevels(device, texture, level, width, height, count) {
+  const levels = []
+  for (let i = 0; i < count; i++) {
+    levels.push(await readTexture(device, texture, Math.max(1, width >> i), Math.max(1, height >> i), level + i))
+  }
+  return levels
+}
+
+test("Spark: outputMipLevel fills one mip chain across several encodes", async () => {
+  const device = await createDevice()
+  const options = { format: "rgb" }
+  const base = await makeNoiseImage(256, 128, 1)
+  const preview = await makeNoiseImage(64, 32, 2)
+  const full = await makeNoiseImage(256, 128, 3)
+
+  await expectNoValidationErrors(device, async () => {
+    const spark = await Spark.create(device)
+
+    // References: each image encoded on its own.
+    const baseRef = await spark.encodeTexture(base, { ...options, mips: true })
+    const previewRef = await spark.encodeTexture(preview, { ...options, mips: true })
+    const fullRef = await spark.encodeTexture(full, options)
+    assert.equal(baseRef.mipLevelCount, 2 + previewRef.mipLevelCount)
+
+    // The chain to fill, initially holding `base` at every level.
+    const chain = await spark.encodeTexture(base, { ...options, mips: true })
+
+    // Pass 1: the preview and its mipmaps go to levels 2 and below.
+    const pass1 = await spark.encodeTexture(preview, { ...options, mips: true, outputTexture: chain, outputMipLevel: 2 })
+    assert.equal(pass1, chain, "pass 1 did not write into the output texture")
+
+    // Pass 2: the full image, without mipmaps, goes to level 0 only.
+    const pass2 = await spark.encodeTexture(full, { ...options, outputTexture: chain, outputMipLevel: 0 })
+    assert.equal(pass2, chain, "pass 2 did not write into the output texture")
+
+    // Level 0 comes from pass 2, level 1 is untouched, levels 2.. come from pass 1.
+    const actual = await readLevels(device, chain, 0, 256, 128, chain.mipLevelCount)
+    const expected = [
+      ...(await readLevels(device, fullRef, 0, 256, 128, 1)),
+      ...(await readLevels(device, baseRef, 1, 128, 64, 1)),
+      ...(await readLevels(device, previewRef, 0, 64, 32, previewRef.mipLevelCount))
+    ]
+    for (let level = 0; level < expected.length; level++) {
+      const diff = firstDifference(actual[level], expected[level])
+      assert.ok(!diff, `level ${level}: ${diff}`)
+    }
+
+    for (const texture of [baseRef, previewRef, fullRef, chain]) texture.destroy()
+    spark.dispose()
+  })
+  device.destroy()
+})
+
+test("Spark: outputMipLevel validates the output texture", async () => {
+  const device = await createDevice()
+  const options = { format: "rgb" }
+  const image = await makeNoiseImage(64, 32, 1)
+
+  await expectNoValidationErrors(device, async () => {
+    const spark = await Spark.create(device)
+    const single = await spark.encodeTexture(image, options) // 64x32, one level
+
+    // Level 1 of `single` is 32x16, not 64x32.
+    await assert.rejects(spark.encodeTexture(image, { ...options, outputTexture: single, outputMipLevel: 1 }), /does not fit/)
+    // No room for the mip chain below level 0.
+    await assert.rejects(spark.encodeTexture(image, { ...options, mips: true, outputTexture: single, outputMipLevel: 0 }), /does not fit/)
+    await assert.rejects(spark.encodeTexture(image, { ...options, outputMipLevel: 0 }), /requires an outputTexture/)
+    await assert.rejects(spark.encodeTexture(image, { ...options, outputTexture: single, outputMipLevel: -1 }), /non-negative integer/)
+
+    // Levels smaller than a block are accepted: the 4-texel rounding only applies to level 0.
+    const chain = await spark.encodeTexture(image, { ...options, mipmapCount: 7 })
+    assert.equal(await spark.encodeTexture(await makeNoiseImage(2, 1, 2), { ...options, outputTexture: chain, outputMipLevel: 5 }), chain)
+    assert.equal(await spark.encodeTexture(await makeNoiseImage(1, 1, 3), { ...options, outputTexture: chain, outputMipLevel: 6 }), chain)
+    chain.destroy()
+
+    // A texture spark cannot copy into is rejected too.
+    const readOnly = device.createTexture({ size: [64, 32], format: single.format, usage: GPUTextureUsage.TEXTURE_BINDING })
+    await assert.rejects(spark.encodeTexture(image, { ...options, outputTexture: readOnly, outputMipLevel: 0 }), /does not fit/)
+
+    // Without outputMipLevel a mismatch is not an error: a fresh texture is returned.
+    const fresh = await spark.encodeTexture(image, { ...options, mips: true, outputTexture: single })
+    assert.ok(fresh !== single, "a mismatched hint should allocate a fresh texture")
+    // And an exact match is reused.
+    const reused = await spark.encodeTexture(image, { ...options, outputTexture: single })
+    assert.equal(reused, single, "a matching hint should be reused")
+
+    for (const texture of [single, fresh, readOnly]) texture.destroy()
+    spark.dispose()
+  })
+  device.destroy()
+})
+
+test("Spark: mipmapCount limits the generated chain", async () => {
+  const device = await createDevice()
+  const image = await makeNoiseImage(64, 32, 1)
+  const options = { format: "rgb", mips: true }
+
+  await expectNoValidationErrors(device, async () => {
+    const spark = await Spark.create(device)
+    const full = await spark.encodeTexture(image, options)
+    assert.equal(full.mipLevelCount, 5, "default chain should stop at 4x4")
+    const partial = await spark.encodeTexture(image, { ...options, mipmapCount: 3 })
+    assert.equal(partial.mipLevelCount, 3)
+    const tiny = await spark.encodeTexture(image, { ...options, mipmapCount: 99 })
+    assert.equal(tiny.mipLevelCount, 7, "explicit count should be clamped to the chain down to 1x1")
+
+    const expected = await readLevels(device, full, 0, 64, 32, 3)
+    const actual = await readLevels(device, partial, 0, 64, 32, 3)
+    for (let level = 0; level < 3; level++) {
+      const diff = firstDifference(actual[level], expected[level])
+      assert.ok(!diff, `level ${level}: ${diff}`)
+    }
+    const tinyLevels = await readLevels(device, tiny, 0, 64, 32, 7)
+    const fullLevels = await readLevels(device, full, 0, 64, 32, 5)
+    for (let level = 0; level < 5; level++) {
+      const diff = firstDifference(tinyLevels[level], fullLevels[level])
+      assert.ok(!diff, `level ${level}: ${diff}`)
+    }
+    assert.equal(tinyLevels[6].length, 4)
+
+    await assert.rejects(spark.encodeTexture(image, { ...options, mipmapCount: 0 }), /positive integer/)
+    await assert.rejects(spark.encodeTexture(image, { ...options, mipmapCount: 1.5 }), /positive integer/)
+
+    for (const texture of [full, partial, tiny]) texture.destroy()
+    spark.dispose()
+  })
+  device.destroy()
+})
+
+test("Spark: a caller-supplied mip chain is encoded one level per call", async () => {
+  const device = await createDevice()
+  const options = { format: "rgb" }
+  const levelCount = 4
+  const images = []
+  for (let level = 0; level < levelCount; level++) {
+    images.push(await makeNoiseImage(64 >> level, 32 >> level, level + 1))
+  }
+
+  await expectNoValidationErrors(device, async () => {
+    const spark = await Spark.create(device)
+
+    // First call allocates the chain and encodes level 0 only; the rest come one level per call.
+    const chain = await spark.encodeTexture(images[0], { ...options, mipmapCount: levelCount })
+    assert.equal(chain.mipLevelCount, levelCount)
+    for (let level = 1; level < levelCount; level++) {
+      const result = await spark.encodeTexture(images[level], { ...options, outputTexture: chain, outputMipLevel: level })
+      assert.equal(result, chain)
+    }
+
+    // Every level matches the image encoded on its own.
+    for (let level = 0; level < levelCount; level++) {
+      const single = await spark.encodeTexture(images[level], options)
+      const w = 64 >> level
+      const h = 32 >> level
+      const diff = firstDifference(await readTexture(device, chain, w, h, level), await readTexture(device, single, w, h, 0))
+      assert.ok(!diff, `level ${level}: ${diff}`)
+      single.destroy()
+    }
+
+    chain.destroy()
+    spark.dispose()
+  })
+  device.destroy()
+})
