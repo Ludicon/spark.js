@@ -1,0 +1,296 @@
+<!doctype html>
+<html>
+  <!-- prettier-ignore -->
+  <head>
+    <title>spark.js - Custom mipmaps example (WebGL)</title>
+    <style>
+      body { margin: 0; background: black; font-family: sans-serif; }
+      canvas { display: block; }
+      #info {
+        position: absolute; top: 20px; left: 20px;
+        background: rgba(0, 0, 0, 0.7); color: white;
+        padding: 15px 20px; border-radius: 8px; font-size: 14px; max-width: 420px;
+      }
+      #status { margin-top: 10px; font-size: 12px; color: #aaa; }
+    </style>
+  </head>
+
+  <body>
+    <!-- prettier-ignore -->
+    <div id="info">
+      Each mip level is drawn on its own canvas and encoded into the same texture with
+      <code>outputTexture</code> and <code>outputMipLevel</code>.
+      <div id="status"></div>
+    </div>
+    <script type="module">
+      import { SparkGL } from "@ludicon/spark.js"
+
+      const errorMessage = `
+          <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
+            <h1>WebGL2 Not Supported</h1>
+            <p>This demo requires a browser with WebGL2 support.</p>
+            <p>Please try using a modern browser like <strong>Chrome</strong>, <strong>Firefox</strong>, <strong>Edge</strong>, or <strong>Safari</strong>.</p>
+            <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API" target="_blank">MDN: WebGL API</a></p>
+          </div>
+        `
+
+      async function initWebGL() {
+        const canvas = document.createElement("canvas")
+        document.body.appendChild(canvas)
+
+        const gl = canvas.getContext("webgl2")
+        if (!gl) {
+          document.body.innerHTML = errorMessage
+          throw new Error("WebGL2 not supported")
+        }
+
+        return { gl, canvas }
+      }
+
+      // Draw one mip level: a solid colour with the level number in the middle, when it fits.
+      function createMipLevelCanvas(level, size) {
+        const canvas = document.createElement("canvas")
+        canvas.width = size
+        canvas.height = size
+        const ctx = canvas.getContext("2d")
+
+        ctx.fillStyle = `hsl(${(level * 47) % 360}, 70%, 50%)`
+        ctx.fillRect(0, 0, size, size)
+
+        if (size >= 32) {
+          ctx.fillStyle = "white"
+          ctx.font = `bold ${Math.round(size * 0.6)}px sans-serif`
+          ctx.textAlign = "center"
+          ctx.textBaseline = "middle"
+          ctx.fillText(String(level), size / 2, size / 2)
+        }
+
+        return canvas
+      }
+
+      // Lay the levels out in a 1.5:1 space, in texture widths: level 0 fills the square on the
+      // left, and levels 1 and below are stacked down the column to its right at their true size
+      // (they add up to just under one texture height). Each level gets [u, v, size].
+      function computeLayout(mipmapCount) {
+        const rects = [[0, 0, 1]]
+        let v = 0
+        for (let level = 1; level < mipmapCount; level++) {
+          const size = 1 / (1 << level)
+          rects.push([1, v, size])
+          v += size
+        }
+        return rects
+      }
+
+      // Vertex shader
+      const vertexShader = `#version 300 es
+        uniform vec2 uCanvasSize;
+        uniform vec2 uTextureSize;
+
+        in vec2 aPosition;
+        in vec2 aTexCoord;
+
+        out vec2 vTexCoord;
+
+        void main() {
+          // Scale the position to maintain the 1.5:1 aspect ratio of the layout
+          float aspect = (uTextureSize.y * uCanvasSize.x) / (uCanvasSize.y * uTextureSize.x) / 1.5;
+
+          vec2 scale = vec2(
+            min(1.0, 1.0 / aspect),
+            max(-1.0, -aspect)
+          );
+          vec2 scaledPos = aPosition * scale;
+
+          gl_Position = vec4(scaledPos, 0.0, 1.0);
+          vTexCoord = aTexCoord;
+        }
+      `
+
+      // Fragment shader
+      const fragmentShader = `#version 300 es
+        precision mediump float;
+
+        uniform sampler2D uTexture;
+        uniform int uLevelCount;
+        uniform vec4 uRects[16]; // [u, v, size] of each level in the 1.5:1 layout
+
+        in vec2 vTexCoord;
+        out vec4 fragColor;
+
+        vec3 linear_to_srgb_vec3(vec3 c) {
+          bvec3 cutoff = lessThanEqual(c, vec3(0.0031308));
+          vec3 higher = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+          vec3 lower = c * 12.92;
+          return mix(higher, lower, cutoff);
+        }
+
+        void main() {
+          // Find the level whose rectangle contains this pixel and sample it.
+          vec3 color = vec3(0.0);
+          vec2 uv = vec2(1.5 * vTexCoord.x, vTexCoord.y);
+
+          for (int i = 0; i < 16; i++) {
+            if (i >= uLevelCount) break;
+            vec2 p = (uv - uRects[i].xy) / uRects[i].z;
+            if (all(greaterThanEqual(p, vec2(0.0))) && all(lessThan(p, vec2(1.0)))) {
+              color = textureLod(uTexture, p, float(i)).xyz;
+              break;
+            }
+          }
+
+          color = linear_to_srgb_vec3(color);
+
+          fragColor = vec4(color, 1.0);
+        }
+      `
+
+      function createShader(gl, type, source) {
+        const shader = gl.createShader(type)
+        gl.shaderSource(shader, source)
+        gl.compileShader(shader)
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          const info = gl.getShaderInfoLog(shader)
+          gl.deleteShader(shader)
+          throw new Error(`Shader compilation failed: ${info}`)
+        }
+
+        return shader
+      }
+
+      function createProgram(gl, vertexShader, fragmentShader) {
+        const program = gl.createProgram()
+        gl.attachShader(program, vertexShader)
+        gl.attachShader(program, fragmentShader)
+        gl.linkProgram(program)
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+          const info = gl.getProgramInfoLog(program)
+          gl.deleteProgram(program)
+          throw new Error(`Program linking failed: ${info}`)
+        }
+
+        return program
+      }
+
+      // Create vertex buffer
+      function createVertexBuffer(gl) {
+        // prettier-ignore
+        const vertices = new Float32Array([
+          // position (x, y), texCoord (u, v)
+          -1.0, -1.0, 0.0, 0.0, // bottom left
+           1.0, -1.0, 1.0, 0.0, // bottom right
+          -1.0,  1.0, 0.0, 1.0, // top left
+           1.0,  1.0, 1.0, 1.0  // top right
+        ])
+
+        const vertexBuffer = gl.createBuffer()
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer)
+        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW)
+        return vertexBuffer
+      }
+
+      // Main initialization
+      async function init() {
+        const { gl, canvas } = await initWebGL()
+
+        // Create SparkGL instance
+        const sparkGL = SparkGL.create(gl, { preload: ["rgb"], verbose: true })
+
+        // Draw every mip level of a 512x512 texture, down to 1x1.
+        const baseSize = 512
+        const mipmapCount = Math.log2(baseSize) + 1
+        const levels = []
+        for (let level = 0; level < mipmapCount; level++) {
+          levels.push(createMipLevelCanvas(level, baseSize >> level))
+        }
+
+        // The first encode allocates the whole mip chain but only writes level 0, since no
+        // mipmaps are generated. Each following encode writes one of the remaining levels.
+        const options = { format: "rgb", srgb: true }
+        let textureObject = await sparkGL.encodeTexture(levels[0], { ...options, mipmapCount })
+        for (let level = 1; level < mipmapCount; level++) {
+          textureObject = await sparkGL.encodeTexture(levels[level], { ...options, outputTexture: textureObject, outputMipLevel: level })
+        }
+
+        document.getElementById("status").textContent =
+          `Encoded ${textureObject.mipmapCount} mip levels (${baseSize}x${baseSize} to 1x1) as ${textureObject.sparkFormat}`
+
+        // Create vertex buffer
+        const vertexBuffer = createVertexBuffer(gl)
+
+        // Create shader program
+        const vs = createShader(gl, gl.VERTEX_SHADER, vertexShader)
+        const fs = createShader(gl, gl.FRAGMENT_SHADER, fragmentShader)
+        const program = createProgram(gl, vs, fs)
+
+        gl.deleteShader(vs)
+        gl.deleteShader(fs)
+
+        // Get attribute and uniform locations
+        const aPosition = gl.getAttribLocation(program, "aPosition")
+        const aTexCoord = gl.getAttribLocation(program, "aTexCoord")
+        const uCanvasSize = gl.getUniformLocation(program, "uCanvasSize")
+        const uTextureSize = gl.getUniformLocation(program, "uTextureSize")
+        const uTexture = gl.getUniformLocation(program, "uTexture")
+        const uLevelCount = gl.getUniformLocation(program, "uLevelCount")
+        const uRects = gl.getUniformLocation(program, "uRects")
+
+        // Layout of the mip levels on screen
+        const rects = new Float32Array(16 * 4)
+        computeLayout(textureObject.mipmapCount).forEach(([u, v, size], i) => rects.set([u, v, size, 0], i * 4))
+
+        // Setup vertex attributes
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer)
+        gl.enableVertexAttribArray(aPosition)
+        gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 16, 0)
+        gl.enableVertexAttribArray(aTexCoord)
+        gl.vertexAttribPointer(aTexCoord, 2, gl.FLOAT, false, 16, 8)
+
+        // Handle window resize
+        function resizeCanvas() {
+          const displayWidth = window.innerWidth
+          const displayHeight = window.innerHeight
+
+          if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+            canvas.width = displayWidth
+            canvas.height = displayHeight
+            gl.viewport(0, 0, displayWidth, displayHeight)
+          }
+        }
+        window.addEventListener("resize", resizeCanvas)
+        resizeCanvas()
+
+        // Render function
+        function render() {
+          gl.clearColor(0.0, 0.0, 0.0, 0.0)
+          gl.clear(gl.COLOR_BUFFER_BIT)
+
+          gl.useProgram(program)
+
+          // Set uniforms
+          gl.uniform2f(uCanvasSize, canvas.width, canvas.height)
+          gl.uniform2f(uTextureSize, textureObject.width, textureObject.height)
+
+          gl.activeTexture(gl.TEXTURE0)
+          gl.bindTexture(gl.TEXTURE_2D, textureObject.texture)
+          gl.uniform1i(uTexture, 0)
+          gl.uniform1i(uLevelCount, textureObject.mipmapCount)
+          gl.uniform4fv(uRects, rects)
+
+          // Draw
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+
+          requestAnimationFrame(render)
+        }
+
+        render()
+      }
+
+      init().catch(error => {
+        console.error("Error initializing WebGL:", error)
+      })
+    </script>
+  </body>
+</html>
