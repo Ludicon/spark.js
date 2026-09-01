@@ -664,12 +664,15 @@ class Spark {
     let inputTexture
 
     if (needsProcessing || !(image instanceof GPUTexture && !mipmaps)) {
-      // Create or reuse input texture
+      // Create or reuse input texture. A cached texture is only reused when it has exactly the
+      // same size as the image: the mipmap and encoder shaders size themselves from the texture
+      // (edge blocks and mip filters fetch past the image extent), so a larger texture would
+      // bleed the previous image into the result. See https://github.com/Ludicon/spark.js/issues/42.
       const needsRealloc =
         !this.#cacheTempResources ||
         !this.#cachedInputTexture ||
-        this.#cachedInputTexture.width < width ||
-        this.#cachedInputTexture.height < height ||
+        this.#cachedInputTexture.width !== width ||
+        this.#cachedInputTexture.height !== height ||
         this.#cachedInputTexture.format != inputFormat ||
         this.#cachedInputTexture.mipLevelCount < mipmapCount
 
@@ -679,13 +682,11 @@ class Spark {
         if (this.#cacheTempResources && this.#cachedInputTexture) {
           this.#cachedInputTexture.destroy()
         }
-        // When caching, honor the minimum size and mipmap allocation hints.
-        const allocWidth = Math.max(width, this.#cacheMinSize)
-        const allocHeight = Math.max(height, this.#cacheMinSize)
+        // When caching, honor the mipmap allocation hint (minSize does not apply, see above).
         const allocMipmaps = mipmaps || this.#cacheAllocateMipmaps
-        const allocMipLevelCount = allocMipmaps ? computeMipmapLayout(allocWidth, allocHeight, blockSize, true).mipmapCount : 1
+        const allocMipLevelCount = allocMipmaps ? computeMipmapLayout(width, height, blockSize, true).mipmapCount : 1
         inputTexture = this.#device.createTexture({
-          size: [allocWidth, allocHeight, 1],
+          size: [width, height, 1],
           mipLevelCount: allocMipLevelCount,
           format: inputFormat,
           usage: inputUsage,
@@ -703,13 +704,14 @@ class Spark {
       if (image instanceof GPUTexture) {
         this.#processInputTexture(commandEncoder, image, inputTexture, width, height, srgb, options.flipY)
       } else {
-        // Create or reuse temporary texture using the input size
+        // Create or reuse temporary texture using the input size. Exact size only: the resize
+        // and flip shaders sample it with normalized coordinates over the whole texture.
         const needsTmpRealloc =
           !this.#cacheTempResources ||
           !this.#cachedTmpTexture ||
-          this.#cachedTmpTexture.width < srcWidth ||
-          this.#cachedTmpTexture.height < srcHeight ||
-          this.#cachedInputTexture.format != inputFormat
+          this.#cachedTmpTexture.width !== srcWidth ||
+          this.#cachedTmpTexture.height !== srcHeight ||
+          this.#cachedTmpTexture.format != inputFormat
 
         if (this.#cacheTempResources && this.#cachedTmpTexture && !needsTmpRealloc) {
           tmpTexture = this.#cachedTmpTexture
@@ -718,7 +720,7 @@ class Spark {
             this.#cachedTmpTexture.destroy()
           }
           tmpTexture = this.#device.createTexture({
-            size: [Math.max(srcWidth, this.#cacheMinSize), Math.max(srcHeight, this.#cacheMinSize), 1],
+            size: [srcWidth, srcHeight, 1],
             mipLevelCount: 1,
             format: inputFormat,
             // RENDER_ATTACHMENT usage is necessary for copyExternalImageToTexture

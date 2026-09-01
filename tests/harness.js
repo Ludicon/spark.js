@@ -96,3 +96,45 @@ export async function makeSolidImage(size, color) {
   ctx.fillRect(0, 0, size, size)
   return createImageBitmap(canvas)
 }
+
+/** An ImageBitmap whose top half is `top` and bottom half is `bottom`. */
+export async function makeTwoToneImage(size, top, bottom) {
+  const canvas = new OffscreenCanvas(size, size)
+  const ctx = canvas.getContext("2d")
+  ctx.fillStyle = top
+  ctx.fillRect(0, 0, size, size / 2)
+  ctx.fillStyle = bottom
+  ctx.fillRect(0, size / 2, size, size / 2)
+  return createImageBitmap(canvas)
+}
+
+/** A deterministic noise ImageBitmap (seeded LCG), so edge/mip differences are visible. */
+export async function makeNoiseImage(width, height, seed = 1) {
+  const canvas = new OffscreenCanvas(width, height)
+  const ctx = canvas.getContext("2d")
+  const data = ctx.createImageData(width, height)
+  let x = seed >>> 0
+  for (let i = 0; i < data.data.length; i += 4) {
+    x = (Math.imul(x, 1664525) + 1013904223) >>> 0
+    data.data[i] = x & 255
+    data.data[i + 1] = (x >>> 8) & 255
+    data.data[i + 2] = (x >>> 16) & 255
+    data.data[i + 3] = 255
+  }
+  ctx.putImageData(data, 0, 0)
+  return createImageBitmap(canvas)
+}
+
+/** Compare two Uint8Arrays; returns null if equal, else a short description of the first difference. */
+export function firstDifference(a, b) {
+  if (a.length !== b.length) return `length ${a.length} vs ${b.length}`
+  let count = 0
+  let first = -1
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) {
+      if (first < 0) first = i
+      count++
+    }
+  }
+  return first < 0 ? null : `${count} bytes differ, first at byte ${first} (${a[first]} vs ${b[first]})`
+}

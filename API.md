@@ -324,11 +324,11 @@ const textures = await Promise.all(
 spark.freeTempResources()
 ```
 
-Cached resources are allocated lazily, the first time an encode needs them, and are sized by that encode. A later encode that is larger, or that needs more mipmap levels, reallocates them; a smaller one reuses them. They are released by `freeTempResources()` or `dispose()`.
+Cached resources are allocated lazily, the first time an encode needs them, and are sized by that encode. The block-level resources (render targets and buffers) are reused by any encode that fits in them and reallocated by a larger one. The source texture is only reused by images of exactly the same size: the mipmap generator and the encoders read the whole texture, so a larger one would bleed the previous image into the edges and mipmaps of the new one. All cached resources are released by `freeTempResources()` or `dispose()`.
 
 #### Sizing the cache
 
-Because the cache only grows on demand, a sequence of encodes of increasing size (for example 64, 128, 256, 512) reallocates at every step. To avoid this, pass an object instead of `true` to control how the cached resources are allocated. Both fields are optional and behave the same in `Spark` and `SparkGL`:
+Because the cache only grows on demand, a sequence of encodes of increasing size (for example 64, 128, 256, 512) reallocates the block-level resources at every step. To avoid this, pass an object instead of `true` to control how the cached resources are allocated. Both fields are optional and behave the same in `Spark` and `SparkGL`:
 
 ```js
 const spark = await Spark.create(device, {
@@ -336,10 +336,10 @@ const spark = await Spark.create(device, {
 })
 ```
 
-- `minSize` (`number`, default: `0`) - Minimum width and height, in texels, that cached resources are allocated for. With `minSize: 512` the sequence above allocates once, on the first encode. Encodes larger than `minSize` still grow the cache. The value is clamped to the device's maximum texture size.
-- `allocateMipmaps` (`boolean`, default: `false`) - Allocate cached resources with a full mip chain even if the encode that triggers the allocation does not generate mipmaps. By default the chain is only allocated when the triggering encode requests mipmaps, so callers that never use mipmaps (for example tile renderers) don't pay for it. Callers that mix mipmapped and non-mipmapped encodes can set this to avoid a reallocation the first time mipmaps are requested.
+- `minSize` (`number`, default: `0`) - Minimum width and height, in texels, that the block-level resources are allocated for. With `minSize: 512` the sequence above allocates them once, on the first encode. Encodes larger than `minSize` still grow the cache. The value is clamped to the device's maximum texture size. It does not apply to the source texture, for the reason given above.
+- `allocateMipmaps` (`boolean`, default: `false`) - Allocate the cached source texture with a full mip chain even if the encode that triggers the allocation does not generate mipmaps. By default the chain is only allocated when the triggering encode requests mipmaps, so callers that never use mipmaps (for example tile renderers) don't pay for it. Callers that mix mipmapped and non-mipmapped encodes of the same size can set this to avoid a reallocation the first time mipmaps are requested.
 
-Memory cost for `minSize = N` is roughly `N² × 4` bytes for the RGBA8 source copy (×4/3 with mipmaps), plus `(N/4)² × 16` bytes per block render target or output buffer. For `N = 4096` that is 64–85 MB plus 16 MB.
+Memory cost for `minSize = N` is roughly `(N/4)² × 16` bytes per block render target or output buffer, i.e. 16 MB for `N = 4096`. The source texture costs `width × height × 4` bytes (×4/3 with mipmaps) for the last encoded size.
 
 ### Verbose Logging
 
