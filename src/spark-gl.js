@@ -532,6 +532,21 @@ export class SparkGL {
     return programPromise
   }
 
+  // Copy level 0 of a texture into level 0 of another, flipping it vertically if requested.
+  // The source must be color-renderable to be attached to a framebuffer (e.g. RGBA8).
+  #blitTexture(src, dst, width, height, flipY) {
+    const gl = this.#gl
+    const readFbo = gl.createFramebuffer()
+    const drawFbo = gl.createFramebuffer()
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, readFbo)
+    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, src, 0)
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, drawFbo)
+    gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst, 0)
+    gl.blitFramebuffer(0, 0, width, height, 0, flipY ? height : 0, width, flipY ? 0 : height, gl.COLOR_BUFFER_BIT, gl.NEAREST)
+    gl.deleteFramebuffer(readFbo)
+    gl.deleteFramebuffer(drawFbo)
+  }
+
   async encodeTexture(image, options = {}) {
     const gl = this.#gl
 
@@ -546,11 +561,29 @@ export class SparkGL {
       }
     }
 
+    // UNPACK_FLIP_Y_WEBGL does not apply to ImageBitmap sources (their orientation is fixed when
+    // they are created), so flip those with createImageBitmap and encode the flipped copy.
+    if (image instanceof ImageBitmap && options.flipY) {
+      const flipped = await createImageBitmap(image, { imageOrientation: "flipY", premultiplyAlpha: "none", colorSpaceConversion: "none" })
+      try {
+        return await this.encodeTexture(flipped, { ...options, flipY: false })
+      } finally {
+        flipped.close()
+      }
+    }
+
+    // A caller's WebGL texture comes in a { texture, width, height } descriptor, since WebGL
+    // cannot query the size of a texture.
+    const inputTexture = image.texture instanceof WebGLTexture ? image : null
+
     // Diagnose image type
-    this.#log(`Image type: ${image.constructor.name}`)
+    this.#log(`Image type: ${inputTexture ? "WebGLTexture" : image.constructor.name}`)
 
     const width = image.displayWidth ?? image.width ?? image.videoWidth
     const height = image.displayHeight ?? image.height ?? image.videoHeight
+    if (inputTexture && !(Number.isInteger(width) && width > 0 && Number.isInteger(height) && height > 0)) {
+      throw new Error(`Input texture descriptor needs a positive integer width and height, got ${width}x${height}`)
+    }
     assert(width && height)
 
     // Choose format. Default to "rgb" if no format specified
@@ -656,43 +689,61 @@ export class SparkGL {
 
     const cacheTempResources = this.#cacheTempResources
 
-    // Create or reuse input texture. A cached texture is only reused when it has exactly the
-    // same size as the image: generateMipmap and the encoders read the whole texture (edge
-    // blocks and mip filters fetch past the image extent), so a larger texture would bleed
-    // the previous image into the result. See https://github.com/Ludicon/spark.js/issues/42.
+    // A caller's texture is encoded in place when nothing needs to be done to it: the encoders
+    // fetch texels from level 0 (relative to TEXTURE_BASE_LEVEL, which is saved and restored),
+    // so its sampler state does not matter. Otherwise its level 0 is copied into our own source
+    // texture, flipped on the way if requested, and mipmaps are generated from the copy.
+    const useInputDirectly = inputTexture && !options.flipY && !generateMipmaps
     let srcTexture
-    const needsSrcRealloc =
-      !cacheTempResources ||
-      !this.#cachedSrcTexture ||
-      this.#cachedSrcWidth !== width ||
-      this.#cachedSrcHeight !== height ||
-      this.#cachedSrcMipLevelCount < encodedMipmapCount
+    let savedBaseLevel = 0
 
-    if (!needsSrcRealloc) {
-      srcTexture = this.#cachedSrcTexture
+    if (useInputDirectly) {
+      srcTexture = inputTexture.texture
       gl.bindTexture(gl.TEXTURE_2D, srcTexture)
+      savedBaseLevel = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL)
     } else {
-      if (cacheTempResources && this.#cachedSrcTexture) {
-        gl.deleteTexture(this.#cachedSrcTexture)
+      // Create or reuse input texture. A cached texture is only reused when it has exactly the
+      // same size as the image: generateMipmap and the encoders read the whole texture (edge
+      // blocks and mip filters fetch past the image extent), so a larger texture would bleed
+      // the previous image into the result. See https://github.com/Ludicon/spark.js/issues/42.
+      const needsSrcRealloc =
+        !cacheTempResources ||
+        !this.#cachedSrcTexture ||
+        this.#cachedSrcWidth !== width ||
+        this.#cachedSrcHeight !== height ||
+        this.#cachedSrcMipLevelCount < encodedMipmapCount
+
+      if (!needsSrcRealloc) {
+        srcTexture = this.#cachedSrcTexture
+        gl.bindTexture(gl.TEXTURE_2D, srcTexture)
+      } else {
+        if (cacheTempResources && this.#cachedSrcTexture) {
+          gl.deleteTexture(this.#cachedSrcTexture)
+        }
+        // When caching, honor the mipmap allocation hint (minSize does not apply, see above).
+        const allocMipLevelCount = Math.max(encodedMipmapCount, this.#cacheAllocateMipmaps ? fullMipmapCount(width, height) : 1)
+        srcTexture = gl.createTexture()
+        gl.bindTexture(gl.TEXTURE_2D, srcTexture)
+        gl.texStorage2D(gl.TEXTURE_2D, allocMipLevelCount, gl.RGBA8, width, height)
+        if (cacheTempResources) {
+          this.#cachedSrcTexture = srcTexture
+          this.#cachedSrcWidth = width
+          this.#cachedSrcHeight = height
+          this.#cachedSrcMipLevelCount = allocMipLevelCount
+        }
       }
-      // When caching, honor the mipmap allocation hint (minSize does not apply, see above).
-      const allocMipLevelCount = Math.max(encodedMipmapCount, this.#cacheAllocateMipmaps ? fullMipmapCount(width, height) : 1)
-      srcTexture = gl.createTexture()
-      gl.bindTexture(gl.TEXTURE_2D, srcTexture)
-      gl.texStorage2D(gl.TEXTURE_2D, allocMipLevelCount, gl.RGBA8, width, height)
-      if (cacheTempResources) {
-        this.#cachedSrcTexture = srcTexture
-        this.#cachedSrcWidth = width
-        this.#cachedSrcHeight = height
-        this.#cachedSrcMipLevelCount = allocMipLevelCount
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
+
+      if (inputTexture) {
+        this.#blitTexture(inputTexture.texture, srcTexture, width, height, Boolean(options.flipY))
+      } else {
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, Boolean(options.flipY))
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, image)
       }
     }
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, Boolean(options.flipY))
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, image)
 
     // Generate mipmaps if requested
     if (generateMipmaps) {
@@ -840,16 +891,19 @@ export class SparkGL {
     }
 
     // The encode loop leaves TEXTURE_BASE_LEVEL at the last mip level. Reset it so that a
-    // reused source texture generates mipmaps from level 0 on the next encode.
+    // reused source texture generates mipmaps from level 0 on the next encode, or restore the
+    // caller's value on a texture encoded in place.
     gl.bindTexture(gl.TEXTURE_2D, srcTexture)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, 0)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, savedBaseLevel)
 
     // Cleanup temporary resources (unless cached)
     if (!cacheTempResources) {
       gl.deleteTexture(mipDstTexture)
       gl.deleteBuffer(dstBuffer)
       gl.deleteFramebuffer(fbo)
-      gl.deleteTexture(srcTexture)
+      if (!useInputDirectly) {
+        gl.deleteTexture(srcTexture)
+      }
     }
 
     // Restore GL state

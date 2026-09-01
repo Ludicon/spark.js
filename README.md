@@ -116,8 +116,8 @@ Load an image and encode it to a compressed GPU texture.
 
 #### Parameters
 
-- **`source`** (`string | Blob | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | GPUTexture | WebGLTexture`)  
-  The image to encode.
+- **`source`** (`string | Blob | HTMLImageElement | ImageBitmap | HTMLCanvasElement | OffscreenCanvas | VideoFrame | GPUTexture | { texture: WebGLTexture, width, height }`)  
+  The image to encode. A WebGL texture is passed with its size, since WebGL cannot query it.
 
 - **`options`** *(optional object)*
   Configuration options for encoding:

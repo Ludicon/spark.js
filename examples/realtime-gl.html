@@ -1,0 +1,239 @@
+<!doctype html>
+<html>
+  <!-- prettier-ignore -->
+  <head>
+    <title>spark.js - Realtime procedural texture (WebGL)</title>
+    <style>
+      body { margin: 0; background: black; }
+      canvas { display: block; }
+    </style>
+  </head>
+
+  <body>
+    <script type="module">
+      import { SparkGL } from "@ludicon/spark.js"
+
+      const errorMessage = `
+          <div style="padding: 2em; font-family: sans-serif; max-width: 600px; margin: 5em auto; text-align: center;">
+            <h1>WebGL2 Not Supported</h1>
+            <p>This demo requires a browser with WebGL2 support.</p>
+            <p>Please try using a modern browser like <strong>Chrome</strong>, <strong>Firefox</strong>, <strong>Edge</strong>, or <strong>Safari</strong>.</p>
+            <p>More information: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API" target="_blank">MDN: WebGL API</a></p>
+          </div>
+        `
+
+      async function initWebGL() {
+        const canvas = document.createElement("canvas")
+        document.body.appendChild(canvas)
+
+        const gl = canvas.getContext("webgl2")
+        if (!gl) {
+          document.body.innerHTML = errorMessage
+          throw new Error("WebGL2 not supported")
+        }
+
+        return { gl, canvas }
+      }
+
+      // Fullscreen triangle vertex shader, shared by the procedural and display passes.
+      const fullscreenVertexShader = `#version 300 es
+        out vec2 vTexCoord;
+
+        void main() {
+          vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+          vTexCoord = p;
+          gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+        }
+      `
+
+      // Procedural texture fragment shader
+      const proceduralShader = `#version 300 es
+        precision highp float;
+
+        uniform float uTime;
+
+        in vec2 vTexCoord;
+        out vec4 fragColor;
+
+        const float PI = 3.14159265;
+
+        void main() {
+          vec2 uv = vTexCoord;
+
+          float t = uTime * 10.0;
+          vec2 vp = vec2(512.0, 512.0);
+
+          vec2 p0 = (uv - 0.5) * vp;
+          vec2 hvp = vp * 0.5;
+          vec2 p1d = vec2(cos(t / 98.0), sin(t / 178.0)) * hvp - p0;
+          vec2 p2d = vec2(sin(-t / 124.0), cos(-t / 104.0)) * hvp - p0;
+          vec2 p3d = vec2(cos(-t / 165.0), cos(t / 45.0)) * hvp - p0;
+
+          float sum = 0.5 + 0.5 * (
+            cos(length(p1d) / 30.0) +
+            cos(length(p2d) / 20.0) +
+            sin(length(p3d) / 25.0) * sin(p3d.x / 20.0) * sin(p3d.y / 15.0)
+          );
+
+          float i = fract(sum);
+          vec3 t2 = (64.0 * uTime) / vec3(63.0, 78.0, 45.0);
+          vec3 cs = cos(i * PI * 2.0 + vec3(0.0, 1.0, -0.5) * PI + t2);
+          cs = 0.5 * cs + 0.5;
+
+          fragColor = vec4(cs, cs.x);
+        }
+      `
+
+      // Display fragment shader: draws the compressed texture with a 1:1 aspect ratio.
+      const displayShader = `#version 300 es
+        precision mediump float;
+
+        uniform sampler2D uTexture;
+        uniform vec2 uCanvasSize;
+        uniform vec2 uTextureSize;
+
+        in vec2 vTexCoord;
+        out vec4 fragColor;
+
+        void main() {
+          // Scale the texture to maintain its aspect ratio, centered in the canvas
+          float aspect = (uTextureSize.y * uCanvasSize.x) / (uCanvasSize.y * uTextureSize.x);
+          vec2 scale = vec2(max(1.0, aspect), max(1.0, 1.0 / aspect));
+          vec2 uv = (vTexCoord - 0.5) * scale + 0.5;
+
+          if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+            fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+          } else {
+            fragColor = vec4(textureLod(uTexture, uv, 0.0).xyz, 1.0);
+          }
+        }
+      `
+
+      function createShader(gl, type, source) {
+        const shader = gl.createShader(type)
+        gl.shaderSource(shader, source)
+        gl.compileShader(shader)
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          const info = gl.getShaderInfoLog(shader)
+          gl.deleteShader(shader)
+          throw new Error(`Shader compilation failed: ${info}`)
+        }
+
+        return shader
+      }
+
+      function createProgram(gl, vertexSource, fragmentSource) {
+        const vs = createShader(gl, gl.VERTEX_SHADER, vertexSource)
+        const fs = createShader(gl, gl.FRAGMENT_SHADER, fragmentSource)
+        const program = gl.createProgram()
+        gl.attachShader(program, vs)
+        gl.attachShader(program, fs)
+        gl.linkProgram(program)
+        gl.deleteShader(vs)
+        gl.deleteShader(fs)
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+          const info = gl.getProgramInfoLog(program)
+          gl.deleteProgram(program)
+          throw new Error(`Program linking failed: ${info}`)
+        }
+
+        return program
+      }
+
+      // Main initialization
+      async function init() {
+        const { gl, canvas } = await initWebGL()
+
+        // Create SparkGL instance with caching for better performance
+        const spark = SparkGL.create(gl, {
+          preload: ["rgb"],
+          cacheTempResources: true
+        })
+
+        // Procedural texture size
+        const textureWidth = 1024
+        const textureHeight = 1024
+
+        // Create the procedural texture and a framebuffer to render into it. The texture is
+        // passed to spark with its size, since WebGL cannot query it.
+        const proceduralTexture = gl.createTexture()
+        gl.bindTexture(gl.TEXTURE_2D, proceduralTexture)
+        gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, textureWidth, textureHeight)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+        const proceduralSource = { texture: proceduralTexture, width: textureWidth, height: textureHeight }
+
+        const proceduralFbo = gl.createFramebuffer()
+        gl.bindFramebuffer(gl.FRAMEBUFFER, proceduralFbo)
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, proceduralTexture, 0)
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+
+        // Create shader programs
+        const proceduralProgram = createProgram(gl, fullscreenVertexShader, proceduralShader)
+        const uTime = gl.getUniformLocation(proceduralProgram, "uTime")
+
+        const displayProgram = createProgram(gl, fullscreenVertexShader, displayShader)
+        const uTexture = gl.getUniformLocation(displayProgram, "uTexture")
+        const uCanvasSize = gl.getUniformLocation(displayProgram, "uCanvasSize")
+        const uTextureSize = gl.getUniformLocation(displayProgram, "uTextureSize")
+
+        // Handle window resize
+        function resizeCanvas() {
+          const displayWidth = window.innerWidth
+          const displayHeight = window.innerHeight
+
+          if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+            canvas.width = displayWidth
+            canvas.height = displayHeight
+          }
+        }
+        window.addEventListener("resize", resizeCanvas)
+        resizeCanvas()
+
+        let startTime = performance.now()
+        let compressedTexture
+
+        // Render function
+        async function render() {
+          const currentTime = (performance.now() - startTime) / 1000.0
+
+          // Generate procedural texture
+          gl.bindFramebuffer(gl.FRAMEBUFFER, proceduralFbo)
+          gl.viewport(0, 0, textureWidth, textureHeight)
+          gl.useProgram(proceduralProgram)
+          gl.uniform1f(uTime, currentTime)
+          gl.drawArrays(gl.TRIANGLES, 0, 3)
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+
+          // Encode the procedural texture with Spark. It is read in place, and the result is
+          // written into the existing compressedTexture so that it is not reallocated.
+          compressedTexture = await spark.encodeTexture(proceduralSource, {
+            format: "rgb",
+            mips: false,
+            outputTexture: compressedTexture
+          })
+
+          // Render the compressed texture
+          gl.viewport(0, 0, canvas.width, canvas.height)
+          gl.useProgram(displayProgram)
+          gl.activeTexture(gl.TEXTURE0)
+          gl.bindTexture(gl.TEXTURE_2D, compressedTexture.texture)
+          gl.uniform1i(uTexture, 0)
+          gl.uniform2f(uCanvasSize, canvas.width, canvas.height)
+          gl.uniform2f(uTextureSize, textureWidth, textureHeight)
+          gl.drawArrays(gl.TRIANGLES, 0, 3)
+
+          requestAnimationFrame(render)
+        }
+
+        render()
+      }
+
+      init().catch(error => {
+        console.error("Error initializing WebGL:", error)
+      })
+    </script>
+  </body>
+</html>

@@ -477,3 +477,113 @@ test("SparkGL: a caller-supplied mip chain is encoded one level per call", async
   await spark.dispose()
   assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
 })
+
+// Upload an image to an RGBA8 texture and describe it as an encodeTexture source.
+function uploadTexture(gl, image) {
+  const texture = gl.createTexture()
+  gl.bindTexture(gl.TEXTURE_2D, texture)
+  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, image.width, image.height)
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, image.width, image.height, gl.RGBA, gl.UNSIGNED_BYTE, image)
+  gl.bindTexture(gl.TEXTURE_2D, null)
+  return { texture, width: image.width, height: image.height }
+}
+
+for (const options of [{}, { flipY: true }, { mips: true }, { mips: true, flipY: true }]) {
+  test(`SparkGL: a WebGL texture source encodes like the image (${JSON.stringify(options)})`, async () => {
+    const tracker = createGL()
+    const gl = tracker.gl
+    const spark = SparkGL.create(gl)
+    const image = await makeNoiseImage(64, 32, 1)
+    const input = uploadTexture(gl, image)
+
+    const expected = await spark.encodeTexture(image, { format: "rgb", ...options })
+    const actual = await spark.encodeTexture(input, { format: "rgb", ...options })
+    assert.equal(actual.mipmapCount, expected.mipmapCount)
+    for (let level = 0; level < expected.mipmapCount; level++) {
+      const w = Math.max(1, 64 >> level)
+      const h = Math.max(1, 32 >> level)
+      const diff = firstDifference(readMipLevel(gl, actual.texture, level, w, h), readMipLevel(gl, expected.texture, level, w, h))
+      assert.ok(!diff, `level ${level}: ${diff}`)
+    }
+
+    gl.deleteTexture(expected.texture)
+    gl.deleteTexture(actual.texture)
+    gl.deleteTexture(input.texture)
+    await spark.dispose()
+    assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
+  })
+}
+
+test("SparkGL: a WebGL texture source encoded in place keeps its state and is not deleted", async () => {
+  const tracker = createGL()
+  const gl = tracker.gl
+  const spark = SparkGL.create(gl, { cacheTempResources: true })
+  const image = await makeNoiseImage(64, 32, 1)
+  const input = uploadTexture(gl, image)
+
+  gl.bindTexture(gl.TEXTURE_2D, input.texture)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.MIRRORED_REPEAT)
+  gl.bindTexture(gl.TEXTURE_2D, null)
+
+  // Encoding in place allocates no source copy: only the output texture, render target and
+  // readback are created.
+  const creations = countTextureCreations(gl)
+  const first = await spark.encodeTexture(input, { format: "rgb" })
+  assert.equal(creations.count, 2, "in-place encode should allocate only the output and the render target")
+
+  gl.bindTexture(gl.TEXTURE_2D, input.texture)
+  assert.equal(gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER), gl.LINEAR, "TEXTURE_MIN_FILTER was changed")
+  assert.equal(gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S), gl.MIRRORED_REPEAT, "TEXTURE_WRAP_S was changed")
+  assert.equal(gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL), 0, "TEXTURE_BASE_LEVEL was changed")
+  gl.bindTexture(gl.TEXTURE_2D, null)
+
+  // The input texture is still usable afterwards (it was not deleted by the cleanup).
+  const second = await spark.encodeTexture(input, { format: "rgb", outputTexture: first })
+  assert.equal(second.texture, first.texture)
+  assert.ok(gl.isTexture(input.texture), "input texture was deleted")
+
+  await assert.rejects(spark.encodeTexture({ texture: input.texture, width: 0, height: 32 }, { format: "rgb" }), /positive integer/)
+
+  gl.deleteTexture(first.texture)
+  gl.deleteTexture(input.texture)
+  await spark.dispose()
+  assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
+})
+
+test("SparkGL: flipY flips every source type", async () => {
+  const tracker = createGL()
+  const gl = tracker.gl
+  const spark = SparkGL.create(gl)
+  const bitmap = await makeNoiseImage(64, 32, 1)
+
+  // Reference: the image flipped on the CPU, encoded without flipY.
+  const flippedCanvas = new OffscreenCanvas(64, 32)
+  const ctx = flippedCanvas.getContext("2d")
+  ctx.translate(0, 32)
+  ctx.scale(1, -1)
+  ctx.drawImage(bitmap, 0, 0)
+  const expected = await spark.encodeTexture(flippedCanvas, { format: "rgb" })
+  const expectedPixels = readMipLevel(gl, expected.texture, 0, 64, 32)
+
+  const canvas = new OffscreenCanvas(64, 32)
+  canvas.getContext("2d").drawImage(bitmap, 0, 0)
+  const sources = {
+    ImageBitmap: bitmap,
+    OffscreenCanvas: canvas,
+    VideoFrame: new VideoFrame(canvas, { timestamp: 0 }),
+    WebGLTexture: uploadTexture(gl, bitmap)
+  }
+  for (const [name, source] of Object.entries(sources)) {
+    const result = await spark.encodeTexture(source, { format: "rgb", flipY: true })
+    const diff = firstDifference(readMipLevel(gl, result.texture, 0, 64, 32), expectedPixels)
+    assert.ok(!diff, `${name}: ${diff}`)
+    gl.deleteTexture(result.texture)
+  }
+  sources.VideoFrame.close()
+
+  gl.deleteTexture(expected.texture)
+  gl.deleteTexture(sources.WebGLTexture.texture)
+  await spark.dispose()
+  assert.equal(tracker.live.size, 0, `leaked GL resources: ${tracker.describe()}`)
+})
