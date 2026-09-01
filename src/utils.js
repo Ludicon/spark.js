@@ -136,7 +136,6 @@ export function getFirefoxVersion() {
 // https://www.ludicon.com/castano/blog/2026/05/image-loading-on-the-web/
 
 const webkitVersion = getSafariVersion()
-//const firefoxVersion = getFirefoxVersion()
 
 // Safari 18.2 (Tahoe) introduced support for SVG in copyExternalImageToTexture
 const SAFARI_TAHOE_VERSION = 619.1 // Safari 18.2
