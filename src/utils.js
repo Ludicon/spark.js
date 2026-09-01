@@ -132,6 +132,26 @@ export function getFirefoxVersion() {
   return match && parseFloat(match[1])
 }
 
+// For the rationale behind the image loding code see:
+// https://www.ludicon.com/castano/blog/2026/05/image-loading-on-the-web/
+
+const webkitVersion = getSafariVersion()
+//const firefoxVersion = getFirefoxVersion()
+
+// Safari 18.2 (Tahoe) introduced support for SVG in copyExternalImageToTexture
+const SAFARI_TAHOE_VERSION = 619.1 // Safari 18.2
+const needsSvgImageBitmapWorkaround = webkitVersion && webkitVersion < SAFARI_TAHOE_VERSION
+
+// Safari always prefers image element over image bitmap.
+// @@ Does this handle RGBA images correctly?
+const useImageElement = webkitVersion
+
+// Prefer ImageDecoder wherever it exists (Chrome, Firefox 133+): it is the only API that
+// decodes off the main thread in Firefox (3-5x faster than createImageBitmap there) and it
+// ties createImageBitmap in Chrome (see bench/). Safari is handled by useImageElement above.
+// loadImageDecoder falls back to createImageBitmap per image type via isTypeSupported.
+const useImageDecoder = typeof ImageDecoder !== "undefined"
+
 export function isSvgUrl(url) {
   return /\.svg(?:$|\?)/i.test(url) || /^data:image\/svg\+xml[,;]/i.test(url)
 }
@@ -207,20 +227,6 @@ export async function loadImageBitmap(url) {
   })
 }
 
-const webkitVersion = getSafariVersion()
-const firefoxVersion = getFirefoxVersion()
-
-// Safari 18.2 (Tahoe) introduced support for SVG in copyExternalImageToTexture
-const SAFARI_TAHOE_VERSION = 619.1 // Safari 18.2
-const needsSvgImageBitmapWorkaround = webkitVersion && webkitVersion < SAFARI_TAHOE_VERSION
-
-// Safari always prefers image element over image bitmap.
-// @@ Does this handle RGBA images correctly?
-const useImageElement = webkitVersion
-
-// ImageDecoder is only available in Firefox 133+ and Chrome, but Chrome does not support AVIF.
-const useImageDecoder = (firefoxVersion && firefoxVersion >= 133) || true
-
 async function convertImageElementToImageBitmap(img) {
   // Render HTMLImageElement to canvas, then create ImageBitmap
   const canvas = document.createElement("canvas")
@@ -234,12 +240,6 @@ async function convertImageElementToImageBitmap(img) {
 }
 
 export async function loadImage(url) {
-  // webkit: loadImageElement is faster than createImageBitmap.
-  // webkit: certain images do not load correctly with loadImageBitmap.
-  // chrome: linear images load incorrectly with loadImageElement.
-  // chrome: loadImageBitmap is slightly faster.
-  // chrome: loadImageBitmap does not support svg files.
-
   const isSvg = isSvgUrl(url)
 
   if (isSvg && needsSvgImageBitmapWorkaround) {
