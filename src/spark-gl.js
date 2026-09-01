@@ -1,6 +1,6 @@
 // WebGL implementation of spark.js texture compression API
 import glslShaders from "./shaders/glsl-shaders.js"
-import { assert, loadImage, loadImageFromBlob, parseCacheTempResources } from "./utils.js"
+import { assert, loadImage, loadImageFromBlob, parseCacheTempResources, resolveOutputTexture, resolveMipmapCount, fullMipmapCount } from "./utils.js"
 
 const SparkFormat = {
   ASTC_4x4_RGB: 0,
@@ -294,19 +294,6 @@ function createProgram(gl, vertexShader, fragmentShader, validate) {
 }
 
 // Let's not waste time generating mips below this size:
-const MIN_MIP_SIZE = 4
-
-function computeMipmapCount(width, height) {
-  let mipmapCount = 1
-  let w = width
-  let h = height
-  while (w > MIN_MIP_SIZE || h > MIN_MIP_SIZE) {
-    mipmapCount++
-    w = Math.max(1, Math.floor(w / 2))
-    h = Math.max(1, Math.floor(h / 2))
-  }
-  return mipmapCount
-}
 
 export class SparkGL {
   #gl
@@ -598,6 +585,27 @@ export class SparkGL {
 
     this.#log(`Using ${srgb ? "sRGB" : "linear"} color space`)
 
+    // Determine mipmap counts: mipmapCount is the number of levels of the output texture,
+    // encodedMipmapCount the number of levels this call writes (see resolveMipmapCount).
+    const { mipmapCount, encodedMipmapCount } = resolveMipmapCount(options, width, height)
+    const generateMipmaps = encodedMipmapCount > 1
+
+    // Resolve the output texture before touching any GL state, so that a rejected
+    // outputTexture leaves the context untouched. The caller passes a previous
+    // encodeTexture() result object (or an equivalent description of its own texture).
+    const { reuse: reuseOutput, outputMipLevel } = resolveOutputTexture(
+      options,
+      options.outputTexture
+        ? {
+            width: options.outputTexture.width,
+            height: options.outputTexture.height,
+            mipLevelCount: options.outputTexture.mipmapCount,
+            format: options.outputTexture.format
+          }
+        : null,
+      { width, height, mipmapCount, encodedMipmapCount, format: glFormat }
+    )
+
     // Make sure we don't have any async code after this, otherwise timing will be incorrect
     // and state restoration will fail.
     const timingLabel = `encodeTexture #${++this.#encodeCounter}`
@@ -646,10 +654,6 @@ export class SparkGL {
         break
     }
 
-    // Determine mipmap count
-    const generateMipmaps = options.generateMipmaps || options.mips
-    const mipmapCount = generateMipmaps ? computeMipmapCount(width, height) : 1
-
     const cacheTempResources = this.#cacheTempResources
 
     // Create or reuse input texture. A cached texture is only reused when it has exactly the
@@ -662,7 +666,7 @@ export class SparkGL {
       !this.#cachedSrcTexture ||
       this.#cachedSrcWidth !== width ||
       this.#cachedSrcHeight !== height ||
-      this.#cachedSrcMipLevelCount < mipmapCount
+      this.#cachedSrcMipLevelCount < encodedMipmapCount
 
     if (!needsSrcRealloc) {
       srcTexture = this.#cachedSrcTexture
@@ -672,8 +676,7 @@ export class SparkGL {
         gl.deleteTexture(this.#cachedSrcTexture)
       }
       // When caching, honor the mipmap allocation hint (minSize does not apply, see above).
-      const allocMipmaps = generateMipmaps || this.#cacheAllocateMipmaps
-      const allocMipLevelCount = allocMipmaps ? computeMipmapCount(width, height) : 1
+      const allocMipLevelCount = Math.max(encodedMipmapCount, this.#cacheAllocateMipmaps ? fullMipmapCount(width, height) : 1)
       srcTexture = gl.createTexture()
       gl.bindTexture(gl.TEXTURE_2D, srcTexture)
       gl.texStorage2D(gl.TEXTURE_2D, allocMipLevelCount, gl.RGBA8, width, height)
@@ -696,42 +699,32 @@ export class SparkGL {
       gl.bindTexture(gl.TEXTURE_2D, srcTexture)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
       gl.generateMipmap(gl.TEXTURE_2D)
-      this.#log(`Generated ${mipmapCount} mipmap levels`)
+      this.#log(`Generated ${encodedMipmapCount} mipmap levels`)
     }
 
-    // Create or reuse output compressed texture. The caller can pass a previous
-    // encodeTexture() result object as options.outputTexture; it is reused only when
-    // dimensions, format, and mipmap count match.
-    const reuseOutput =
-      options.outputTexture &&
-      options.outputTexture.width === width &&
-      options.outputTexture.height === height &&
-      options.outputTexture.mipmapCount === mipmapCount &&
-      options.outputTexture.format === glFormat
-
+    // Create or reuse output compressed texture (see resolveOutputTexture above).
     const compressedTexture = reuseOutput ? options.outputTexture.texture : gl.createTexture()
     gl.bindTexture(gl.TEXTURE_2D, compressedTexture)
     if (!reuseOutput) {
       gl.texStorage2D(gl.TEXTURE_2D, mipmapCount, glFormat, width, height)
-    }
 
-    // Set texture filtering parameters
-    if (generateMipmaps) {
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    } else {
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+      // Set filtering and wrapping parameters. A reused texture belongs to the caller, its
+      // sampler state is left alone.
+      if (mipmapCount > 1) {
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+      } else {
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+      }
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
     }
-
-    // Set texture wrapping mode (as determined above)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, glWrapMode)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, glWrapMode)
 
     const bw = Math.ceil(width / 4)
     const bh = Math.ceil(height / 4)
     const dstBufferSize = blockSize * bw * bh
-    let byteLength = dstBufferSize
+    let byteLength = 0
 
     // Minimum allocation size for cached block resources.
     const minBlocks = Math.ceil(this.#cacheMinSize / 4)
@@ -822,7 +815,7 @@ export class SparkGL {
     gl.useProgram(program)
 
     // Encode each mipmap level
-    for (let mipLevel = 0; mipLevel < mipmapCount; mipLevel++) {
+    for (let mipLevel = 0; mipLevel < encodedMipmapCount; mipLevel++) {
       const mipWidth = Math.max(1, Math.floor(width >> mipLevel))
       const mipHeight = Math.max(1, Math.floor(height >> mipLevel))
       const mipBw = Math.ceil(mipWidth / 4)
@@ -841,9 +834,9 @@ export class SparkGL {
       // Copy dst texture to pixel buffer object
       gl.readPixels(0, 0, mipBw, mipBh, gl.RGBA_INTEGER, blockSize === 16 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0)
 
-      // Copy pixel buffer object to compressed texture at the curent mip level
+      // Copy pixel buffer object to compressed texture at the current mip level
       gl.bindTexture(gl.TEXTURE_2D, compressedTexture)
-      gl.compressedTexSubImage2D(gl.TEXTURE_2D, mipLevel, 0, 0, mipWidth, mipHeight, glFormat, mipSize, 0)
+      gl.compressedTexSubImage2D(gl.TEXTURE_2D, outputMipLevel + mipLevel, 0, 0, mipWidth, mipHeight, glFormat, mipSize, 0)
     }
 
     // The encode loop leaves TEXTURE_BASE_LEVEL at the last mip level. Reset it so that a
@@ -888,15 +881,17 @@ export class SparkGL {
 
     this.#timeEnd(timingLabel)
 
-    // Return the compressed texture
+    // Return the compressed texture. The result always describes the whole texture, which
+    // may be larger than this encode when writing into a caller's texture; byteLength is
+    // the number of bytes written by this call.
     const textureObject = {
       texture: compressedTexture,
-      width,
-      height,
+      width: reuseOutput ? options.outputTexture.width : width,
+      height: reuseOutput ? options.outputTexture.height : height,
       format: glFormat,
       sparkFormat: SparkFormatName[format],
       srgb,
-      mipmapCount,
+      mipmapCount: reuseOutput ? options.outputTexture.mipmapCount : mipmapCount,
       byteLength
     }
 

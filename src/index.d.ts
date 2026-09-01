@@ -92,6 +92,16 @@ export interface SparkEncodeOptions {
   generateMipmaps?: boolean
 
   /**
+   * Number of mip levels of the output texture. An explicit count is clamped to the full
+   * chain down to 1x1. With `mips`, all of them are generated and encoded; without, only
+   * level 0 is encoded and the other levels are left for later encodes with `outputTexture`
+   * and `outputMipLevel`, for callers that provide their own mipmaps.
+   *
+   * @default the chain down to 4x4 with `mips`, otherwise 1
+   */
+  mipmapCount?: number
+
+  /**
    * The filter to use for mipmap generation:
    * - "box" - Simple 2x2 box filter
    * - "magic" - Higher quality 4x4 filter with sharpening properties
@@ -130,15 +140,32 @@ export interface SparkEncodeOptions {
   flipY?: boolean
 
   /**
-   * A previously-returned texture to reuse as the output, avoiding reallocation when
-   * re-encoding into the same shape repeatedly. Reused only when the existing texture
-   * matches the resolved width, height, mipmap count, and format; otherwise a fresh
-   * texture is allocated and returned.
+   * An existing texture to write the result into instead of allocating a new one.
    *
-   * - For Spark: pass the `GPUTexture` returned by a prior `encodeTexture()`.
-   * - For SparkGL: pass the result object returned by a prior `encodeTexture()`.
+   * - For Spark: a `GPUTexture` (it must have `COPY_DST` usage).
+   * - For SparkGL: a previous `encodeTexture()` result, or any object describing the
+   *   texture (see `SparkGLOutputTexture`).
+   *
+   * Without `outputMipLevel` the texture is a hint: it is reused only when its width, height,
+   * mipmap count and format match the encode exactly (for example when re-encoding video
+   * frames), otherwise a fresh texture is allocated and returned. With `outputMipLevel` it is
+   * a requirement, see below.
    */
-  outputTexture?: GPUTexture | SparkGLTextureResult
+  outputTexture?: GPUTexture | SparkGLOutputTexture
+
+  /**
+   * Mip level of `outputTexture` that receives level 0 of the encode; the generated mipmaps
+   * follow at the next levels. Use it to fill one mip chain in several passes, for example a
+   * small preview into the lower levels first and the full-resolution image into level 0
+   * later, or one caller-provided mipmap per call. Levels outside the encode are left untouched.
+   *
+   * When specified (even as 0), `outputTexture` is required and validated: its level
+   * `outputMipLevel` must have the size of the encode, it must have room for all the encoded
+   * levels, and its format must match. A mismatch throws.
+   *
+   * @default undefined (level 0, with `outputTexture` treated as a hint)
+   */
+  outputMipLevel?: number
 }
 
 /**
@@ -251,23 +278,20 @@ export interface SparkGLCreateOptions {
 }
 
 /**
- * Result object returned by SparkGL.encodeTexture()
+ * Description of a WebGL texture that SparkGL.encodeTexture() can write into. WebGL cannot
+ * query these from the texture handle, so the caller provides them. Every encodeTexture()
+ * result satisfies this interface.
  */
-export interface SparkGLTextureResult {
+export interface SparkGLOutputTexture {
   /**
    * The compressed WebGL texture
    */
   texture: WebGLTexture
 
   /**
-   * WebGL internal format constant
+   * WebGL internal format constant the texture storage was allocated with
    */
   format: number
-
-  /**
-   * Human-readable Spark format name
-   */
-  sparkFormat: string
 
   /**
    * Texture width in pixels
@@ -280,9 +304,20 @@ export interface SparkGLTextureResult {
   height: number
 
   /**
-   * Number of mipmap levels
+   * Number of mipmap levels allocated
    */
   mipmapCount: number
+}
+
+/**
+ * Result object returned by SparkGL.encodeTexture(). It always describes the whole texture,
+ * which may be larger than the encode when writing into a caller-supplied `outputTexture`.
+ */
+export interface SparkGLTextureResult extends SparkGLOutputTexture {
+  /**
+   * Human-readable Spark format name
+   */
+  sparkFormat: string
 
   /**
    * Whether the texture is encoded in an sRGB format
@@ -290,7 +325,7 @@ export interface SparkGLTextureResult {
   srgb: boolean
 
   /**
-   * Size of the texture data in bytes
+   * Number of bytes written by this call
    */
   byteLength: number
 }

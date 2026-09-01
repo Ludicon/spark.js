@@ -139,6 +139,9 @@ Load an image and encode it to a compressed GPU texture.
   - **`mips`** or **`generateMipmaps`** (`boolean`)
     Whether to generate mipmaps. Default: `false`.
 
+  - **`mipmapCount`** (`number`)
+    Number of mip levels of the output texture. With `mips`, all of them are generated and encoded; without, only level 0 is encoded and the other levels are left for later encodes with `outputTexture` and `outputMipLevel`. An explicit count is clamped to the full chain down to 1×1. Default: the chain down to 4×4 with `mips`, otherwise `1`.
+
   - **`mipmapFilter`** (`string`)
     The filter to use for mipmap generation. Can be `"box"` for a simple box filter, or `"magic"` for a higher-quality 4-tap filter with sharpening properties. Default: `"magic"`.
 
@@ -154,8 +157,11 @@ Load an image and encode it to a compressed GPU texture.
   - **`flipY`** (`boolean`)
     Whether to vertically flip the image before encoding. Default: `false`.
 
-  - **`outputTexture`** (`GPUTexture` for Spark, result object for SparkGL)
-    A previously-returned texture to reuse as the output, avoiding reallocation when re-encoding into the same shape repeatedly. Reused only when its width, height, mipmap count, and format match the resolved output; otherwise a fresh texture is allocated and returned. Default: `undefined`.
+  - **`outputTexture`** (`GPUTexture` for Spark, texture description for SparkGL)
+    An existing texture to write the result into instead of allocating a new one. Without `outputMipLevel` it is a hint, reused only when its width, height, mipmap count, and format match the resolved output; otherwise a fresh texture is allocated and returned. Default: `undefined`.
+
+  - **`outputMipLevel`** (`number`)
+    Mip level of `outputTexture` that receives level 0 of the encode, with generated mipmaps following at the next levels. Lets several encodes fill one mip chain, for example a small preview first and the full image later. When specified, `outputTexture` is required and must fit the encode. Default: `undefined`.
 
 #### Returns
 
