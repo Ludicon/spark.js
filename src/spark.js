@@ -202,7 +202,7 @@ function detectWebGPUFormats(device) {
   const supportedFormats = new Set()
 
   const formatMap = {
-    "texture-compression-bc": [SparkFormat.BC1_RG, SparkFormat.BC4_R, SparkFormat.BC5_RG, SparkFormat.BC7_RGB, SparkFormat.BC7_RGBA],
+    "texture-compression-bc": [SparkFormat.BC1_RGB, SparkFormat.BC4_R, SparkFormat.BC5_RG, SparkFormat.BC7_RGB, SparkFormat.BC7_RGBA],
     "texture-compression-etc2": [SparkFormat.ETC2_RGB, SparkFormat.EAC_R, SparkFormat.EAC_RG],
     "texture-compression-astc": [SparkFormat.ASTC_4x4_RGB, SparkFormat.ASTC_4x4_RGBA]
   }
