@@ -1,6 +1,6 @@
 # spark.js⚡️
 
-[![npm version](https://img.shields.io/npm/v/@ludicon/spark.js.svg)](https://www.npmjs.com/package/@ludicon/spark.js) [![install size](https://packagephobia.com/badge?p=@ludicon/spark.js)](https://packagephobia.com/result?p=@ludicon/spark.js) [![WebGPU](https://img.shields.io/badge/WebGPU-supported-green.svg)](https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API) [![WebGL2](https://img.shields.io/badge/WebGL2-supported-blue.svg)](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API)
+[![npm version](https://img.shields.io/npm/v/@ludicon/spark.js.svg)](https://www.npmjs.com/package/@ludicon/spark.js) [![install size](https://badgen.net/packagephobia/install/@ludicon/spark.js)](https://packagephobia.com/result?p=@ludicon/spark.js) [![WebGPU](https://img.shields.io/badge/WebGPU-supported-green.svg)](https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API) [![WebGL2](https://img.shields.io/badge/WebGL2-supported-blue.svg)](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API)
 
 Real-time texture compression library for the Web.
 
